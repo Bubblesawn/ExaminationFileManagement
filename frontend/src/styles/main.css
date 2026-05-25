@@ -1,0 +1,21 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: #1f2937;
+  background: #f4f7fb;
+  font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+}
+
+.page {
+  padding: 20px;
+}
+
+.page-title {
+  margin: 0 0 16px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
