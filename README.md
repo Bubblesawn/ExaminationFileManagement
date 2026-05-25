@@ -27,7 +27,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-默认地址：`http://localhost:8080`
+默认地址：`http://localhost:8088`
 
 ### 前端
 
@@ -50,4 +50,3 @@ uvicorn app.main:app --reload --port 9000
 ```
 
 默认地址：`http://localhost:9000`
-
