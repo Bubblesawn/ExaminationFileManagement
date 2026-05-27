@@ -250,6 +250,36 @@ WHERE NOT EXISTS (
     WHERE record_id = @record_chen AND material_type = 'GRADUATION' AND file_name = '陈思琪毕业申请材料.pdf'
 );
 
+-- 测试档案状态流转记录。
+INSERT INTO record_status_log (record_id, before_status, after_status, change_reason, operator_id, operator_name)
+SELECT @record_zhang, NULL, 'NORMAL', '新建考籍档案', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM record_status_log
+    WHERE record_id = @record_zhang AND after_status = 'NORMAL' AND change_reason = '新建考籍档案'
+);
+
+INSERT INTO record_status_log (record_id, before_status, after_status, change_reason, operator_id, operator_name)
+SELECT @record_wang, 'NORMAL', 'SUSPENDED', '联系方式异常，暂缓办理', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM record_status_log
+    WHERE record_id = @record_wang AND after_status = 'SUSPENDED' AND change_reason = '联系方式异常，暂缓办理'
+);
+
+-- 测试档案变更记录。
+INSERT INTO record_change_log (record_id, change_type, change_field, before_value, after_value, change_reason, operator_id, operator_name)
+SELECT @record_li, 'MATERIAL_CHANGE', 'record_material.audit_status', NULL, 'PENDING', '上传课程免考证明材料', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM record_change_log
+    WHERE record_id = @record_li AND change_type = 'MATERIAL_CHANGE' AND change_reason = '上传课程免考证明材料'
+);
+
+INSERT INTO record_change_log (record_id, change_type, change_field, before_value, after_value, change_reason, operator_id, operator_name)
+SELECT @record_chen, 'UPDATE', 'remark', NULL, '毕业申请预审通过', '更新毕业申请预审备注', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM record_change_log
+    WHERE record_id = @record_chen AND change_type = 'UPDATE' AND change_reason = '更新毕业申请预审备注'
+);
+
 -- 测试审核记录。
 INSERT INTO audit_record (business_type, business_id, audit_status, audit_opinion, auditor_id)
 SELECT 'MATERIAL', @record_zhang, 'APPROVED', '身份信息清晰，材料有效。', 1001
