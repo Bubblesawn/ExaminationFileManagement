@@ -10,6 +10,8 @@ import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -34,12 +36,14 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class AiAssistServiceImpl implements AiAssistService {
+    private static final String ALGORITHM_API_KEY_HEADER = "X-Internal-Api-Key";
     private static final long MAX_MATERIAL_FILE_SIZE = 10 * 1024 * 1024;
     private static final Set<String> SUPPORTED_MATERIAL_SUFFIXES = Set.of("jpg", "jpeg", "png", "bmp", "webp");
     private static final DateTimeFormatter UPLOAD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final RestTemplate restTemplate;
     private final String algorithmBaseUrl;
+    private final String algorithmApiKey;
     private final Path uploadRootPath;
 
     /**
@@ -47,13 +51,16 @@ public class AiAssistServiceImpl implements AiAssistService {
      *
      * @param restTemplate HTTP 客户端。
      * @param algorithmBaseUrl 算法服务基础地址。
+     * @param algorithmApiKey 后端访问算法服务的内部 API Key。
      */
     public AiAssistServiceImpl(
             RestTemplate restTemplate,
             @Value("${algorithm.service.base-url}") String algorithmBaseUrl,
+            @Value("${algorithm.service.api-key}") String algorithmApiKey,
             @Value("${material.upload.root:uploads/materials}") String uploadRoot) {
         this.restTemplate = restTemplate;
         this.algorithmBaseUrl = trimTrailingSlash(algorithmBaseUrl);
+        this.algorithmApiKey = algorithmApiKey;
         this.uploadRootPath = Path.of(uploadRoot).toAbsolutePath().normalize();
     }
 
@@ -201,7 +208,10 @@ public class AiAssistServiceImpl implements AiAssistService {
         String url = algorithmBaseUrl + path;
         long startTime = System.currentTimeMillis();
         try {
-            AlgorithmResponseVO response = restTemplate.postForObject(url, request, AlgorithmResponseVO.class);
+            AlgorithmResponseVO response = restTemplate.postForObject(
+                    url,
+                    new HttpEntity<>(request, buildAlgorithmHeaders()),
+                    AlgorithmResponseVO.class);
             long cost = System.currentTimeMillis() - startTime;
             if (response == null) {
                 log.error("智能辅助调用失败 action={} businessId={} scene={} url={} cost={}ms reason=响应为空",
@@ -222,6 +232,17 @@ public class AiAssistServiceImpl implements AiAssistService {
                     actionName, businessId, scene, url, cost, exception);
             throw new IllegalStateException(actionName + "算法服务调用失败：" + exception.getMessage(), exception);
         }
+    }
+
+    /**
+     * @brief 构造后端访问算法服务的内部认证请求头。
+     *
+     * @return 包含内部 API Key 的请求头。
+     */
+    private HttpHeaders buildAlgorithmHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(ALGORITHM_API_KEY_HEADER, algorithmApiKey);
+        return headers;
     }
 
     /**

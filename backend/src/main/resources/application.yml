@@ -34,3 +34,4 @@ auth:
 algorithm:
   service:
     base-url: http://localhost:9000/api
+    api-key: examination-algorithm-local-key
