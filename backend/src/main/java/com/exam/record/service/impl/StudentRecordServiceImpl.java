@@ -14,6 +14,7 @@ import com.exam.record.entity.StudentRecord;
 import com.exam.record.mapper.CandidateMapper;
 import com.exam.record.mapper.RecordStatusLogMapper;
 import com.exam.record.mapper.StudentRecordMapper;
+import com.exam.record.service.RecordChangeLogService;
 import com.exam.record.service.StudentRecordService;
 import com.exam.record.util.AuthContextHolder;
 import com.exam.record.vo.StudentRecordVO;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -40,6 +42,10 @@ import java.util.stream.Collectors;
 @Service
 public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, StudentRecord>
         implements StudentRecordService {
+    private static final String CHANGE_TYPE_CREATE = "CREATE";
+    private static final String CHANGE_TYPE_UPDATE = "UPDATE";
+    private static final String CHANGE_TYPE_ARCHIVE = "ARCHIVE";
+    private static final String CHANGE_TYPE_STATUS_CHANGE = "STATUS_CHANGE";
     private static final String STATUS_NORMAL = "NORMAL";
     private static final String STATUS_SUSPENDED = "SUSPENDED";
     private static final String STATUS_CANCELLED = "CANCELLED";
@@ -49,17 +55,21 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
 
     private final CandidateMapper candidateMapper;
     private final RecordStatusLogMapper recordStatusLogMapper;
+    private final RecordChangeLogService recordChangeLogService;
 
     /**
      * @brief 构造考籍档案业务实现。
      *
      * @param candidateMapper 考生信息 Mapper。
      * @param recordStatusLogMapper 档案状态记录 Mapper。
+     * @param recordChangeLogService 档案变更记录业务服务。
      */
     public StudentRecordServiceImpl(CandidateMapper candidateMapper,
-                                    RecordStatusLogMapper recordStatusLogMapper) {
+                                    RecordStatusLogMapper recordStatusLogMapper,
+                                    RecordChangeLogService recordChangeLogService) {
         this.candidateMapper = candidateMapper;
         this.recordStatusLogMapper = recordStatusLogMapper;
+        this.recordChangeLogService = recordChangeLogService;
     }
 
     /**
@@ -136,6 +146,13 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
         record.setRemark(dto.getRemark());
         save(record);
         saveStatusLog(record.getId(), null, recordStatus, "新建考籍档案");
+        recordChangeLogService.recordChange(
+                record.getId(),
+                CHANGE_TYPE_CREATE,
+                "record",
+                null,
+                buildRecordSummary(record),
+                "新建考籍档案");
         return getRecordDetail(record.getId());
     }
 
@@ -147,8 +164,10 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
      * @return 修改后的考籍档案。
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public StudentRecordVO updateRecord(Long id, StudentRecordUpdateDTO dto) {
         StudentRecord record = getExistingRecord(id);
+        StudentRecord beforeRecord = copyRecord(record);
         validateCandidateExists(dto.getCandidateId());
         record.setCandidateId(dto.getCandidateId());
         record.setEnrollBatch(dto.getEnrollBatch());
@@ -157,6 +176,12 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
         record.setMajorName(dto.getMajorName());
         record.setRemark(dto.getRemark());
         updateById(record);
+        recordFieldChange(id, "candidateId", beforeRecord.getCandidateId(), record.getCandidateId(), "编辑考籍档案");
+        recordFieldChange(id, "enrollBatch", beforeRecord.getEnrollBatch(), record.getEnrollBatch(), "编辑考籍档案");
+        recordFieldChange(id, "educationLevel", beforeRecord.getEducationLevel(), record.getEducationLevel(), "编辑考籍档案");
+        recordFieldChange(id, "majorCode", beforeRecord.getMajorCode(), record.getMajorCode(), "编辑考籍档案");
+        recordFieldChange(id, "majorName", beforeRecord.getMajorName(), record.getMajorName(), "编辑考籍档案");
+        recordFieldChange(id, "remark", beforeRecord.getRemark(), record.getRemark(), "编辑考籍档案");
         return getRecordDetail(id);
     }
 
@@ -183,6 +208,13 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
         record.setRecordStatus(dto.getRecordStatus());
         updateById(record);
         saveStatusLog(id, beforeStatus, dto.getRecordStatus(), dto.getChangeReason());
+        recordChangeLogService.recordChange(
+                id,
+                CHANGE_TYPE_STATUS_CHANGE,
+                "recordStatus",
+                beforeStatus,
+                dto.getRecordStatus(),
+                dto.getChangeReason());
         return getRecordDetail(id);
     }
 
@@ -212,6 +244,13 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
                 ? "考籍档案归档"
                 : dto.getArchiveReason();
         saveStatusLog(id, ARCHIVE_STATUS_UNARCHIVED, ARCHIVE_STATUS_ARCHIVED, reason);
+        recordChangeLogService.recordChange(
+                id,
+                CHANGE_TYPE_ARCHIVE,
+                "archiveStatus",
+                ARCHIVE_STATUS_UNARCHIVED,
+                ARCHIVE_STATUS_ARCHIVED,
+                reason);
         return getRecordDetail(id);
     }
 
@@ -330,5 +369,46 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
         statusLog.setOperatorName(user == null ? null : user.getRealName());
         statusLog.setOperationTime(LocalDateTime.now());
         recordStatusLogMapper.insert(statusLog);
+    }
+
+    private StudentRecord copyRecord(StudentRecord source) {
+        StudentRecord target = new StudentRecord();
+        target.setCandidateId(source.getCandidateId());
+        target.setEnrollBatch(source.getEnrollBatch());
+        target.setEducationLevel(source.getEducationLevel());
+        target.setMajorCode(source.getMajorCode());
+        target.setMajorName(source.getMajorName());
+        target.setRemark(source.getRemark());
+        return target;
+    }
+
+    private void recordFieldChange(Long recordId,
+                                   String changeField,
+                                   Object beforeValue,
+                                   Object afterValue,
+                                   String changeReason) {
+        String beforeText = stringifyValue(beforeValue);
+        String afterText = stringifyValue(afterValue);
+        if (Objects.equals(beforeText, afterText)) {
+            return;
+        }
+        recordChangeLogService.recordChange(
+                recordId,
+                CHANGE_TYPE_UPDATE,
+                changeField,
+                beforeText,
+                afterText,
+                changeReason);
+    }
+
+    private String stringifyValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String buildRecordSummary(StudentRecord record) {
+        return "考籍号：" + record.getRecordNo()
+                + "；考生ID：" + record.getCandidateId()
+                + "；专业：" + stringifyValue(record.getMajorName())
+                + "；状态：" + record.getRecordStatus();
     }
 }

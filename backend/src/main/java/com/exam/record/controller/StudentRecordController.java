@@ -6,7 +6,9 @@ import com.exam.record.dto.StudentRecordArchiveDTO;
 import com.exam.record.dto.StudentRecordCreateDTO;
 import com.exam.record.dto.StudentRecordStatusUpdateDTO;
 import com.exam.record.dto.StudentRecordUpdateDTO;
+import com.exam.record.service.RecordChangeLogService;
 import com.exam.record.service.StudentRecordService;
+import com.exam.record.vo.RecordChangeLogVO;
 import com.exam.record.vo.StudentRecordVO;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,14 +27,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/records")
 public class StudentRecordController {
     private final StudentRecordService studentRecordService;
+    private final RecordChangeLogService recordChangeLogService;
 
     /**
      * @brief 构造考籍档案控制器。
      *
      * @param studentRecordService 考籍档案业务服务。
+     * @param recordChangeLogService 档案变更记录业务服务。
      */
-    public StudentRecordController(StudentRecordService studentRecordService) {
+    public StudentRecordController(StudentRecordService studentRecordService,
+                                   RecordChangeLogService recordChangeLogService) {
         this.studentRecordService = studentRecordService;
+        this.recordChangeLogService = recordChangeLogService;
     }
 
     /**
@@ -116,5 +122,23 @@ public class StudentRecordController {
     public Result<StudentRecordVO> archive(@PathVariable Long id,
                                            @RequestBody(required = false) StudentRecordArchiveDTO dto) {
         return Result.success(studentRecordService.archiveRecord(id, dto));
+    }
+
+    /**
+     * @brief 分页查询档案变更记录。
+     *
+     * @param id 档案ID。
+     * @param pageNo 当前页码。
+     * @param pageSize 每页条数。
+     * @param changeType 变更类型。
+     * @return 档案变更记录分页数据。
+     */
+    @GetMapping("/{id}/change-logs/page")
+    public Result<Page<RecordChangeLogVO>> pageChangeLogs(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") long pageNo,
+            @RequestParam(defaultValue = "10") long pageSize,
+            @RequestParam(required = false) String changeType) {
+        return Result.success(recordChangeLogService.pageRecordChangeLogs(id, pageNo, pageSize, changeType));
     }
 }
