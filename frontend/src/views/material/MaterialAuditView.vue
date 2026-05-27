@@ -92,6 +92,18 @@
                 <el-form-item label="类型提示">
                   <el-input v-model="item.materialTypeHint" clearable placeholder="例如 身份证、成绩单、毕业证" />
                 </el-form-item>
+                <el-row :gutter="10">
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="MIME 类型">
+                      <el-input v-model="item.contentType" clearable placeholder="例如 image/jpeg" />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="文件大小(KB)">
+                      <el-input-number v-model="item.fileSizeKb" :min="0" controls-position="right" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
               </el-form>
             </div>
           </div>
@@ -103,6 +115,48 @@
       </el-col>
 
       <el-col :xs="24" :lg="15">
+        <section class="panel preprocess-panel">
+          <div class="panel-title">材料预处理结果</div>
+          <el-empty v-if="preprocessResults.length === 0" description="发起智能核验后展示格式、清晰度和分类结果" />
+          <el-table v-else :data="preprocessResults" size="small" border>
+            <el-table-column prop="file_name" label="文件名称" min-width="150" />
+            <el-table-column label="格式校验" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.format_validation.valid ? 'success' : 'danger'" size="small">
+                  {{ row.format_validation.valid ? '通过' : '不通过' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="文件后缀" width="90">
+              <template #default="{ row }">{{ row.format_validation.file_suffix || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="清晰度" min-width="150">
+              <template #default="{ row }">
+                <div class="clarity-cell">
+                  <el-tag :type="clarityTagType(row.clarity.level)" size="small">
+                    {{ clarityText(row.clarity.level) }}
+                  </el-tag>
+                  <span>{{ formatPercent(row.clarity.score) }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="category_name" label="基础分类" min-width="130" />
+            <el-table-column label="置信度" width="100">
+              <template #default="{ row }">{{ formatPercent(row.confidence) }}</template>
+            </el-table-column>
+            <el-table-column label="建议" width="110">
+              <template #default="{ row }">
+                <el-tag :type="actionTagType(row.suggested_action)" size="small">
+                  {{ actionText(row.suggested_action) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="问题提示" min-width="220">
+              <template #default="{ row }">{{ formatPreprocessIssues(row) }}</template>
+            </el-table-column>
+          </el-table>
+        </section>
+
         <section class="panel result-overview">
           <div class="panel-title">智能辅助结果</div>
           <el-empty v-if="!auditResult" description="请先发起申请材料智能核验" />
@@ -223,9 +277,12 @@ import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import {
   auditApplicationMaterials,
+  preprocessMaterial,
   recognizeImage,
   uploadMaterialFile,
   type ApplicationMaterialAuditData,
+  type ImageClarityResult,
+  type MaterialPreprocessData,
   type SuggestedAction
 } from '../../api/ai'
 
@@ -236,10 +293,13 @@ interface EditableMaterial {
   fileName: string
   materialTypeHint: string
   uploadedCategoryCode: string
+  contentType: string
+  fileSizeKb: number
   uploading?: boolean
 }
 
 type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+type ClarityLevel = ImageClarityResult['level']
 
 const materialTypeOptions = [
   { label: '身份证材料', value: 'ID_CARD' },
@@ -275,11 +335,14 @@ const materials = ref<EditableMaterial[]>([
     fileUrl: '',
     fileName: '',
     materialTypeHint: '',
-    uploadedCategoryCode: ''
+    uploadedCategoryCode: '',
+    contentType: '',
+    fileSizeKb: 0
   }
 ])
 const loading = ref(false)
 const auditResult = ref<ApplicationMaterialAuditData | null>(null)
+const preprocessResults = ref<MaterialPreprocessData[]>([])
 
 const overallActionText = computed(() => actionText(auditResult.value?.suggested_action ?? 'REVIEW'))
 const overallTagType = computed(() => actionTagType(auditResult.value?.suggested_action ?? 'REVIEW'))
@@ -293,7 +356,9 @@ function addMaterial() {
     fileUrl: '',
     fileName: '',
     materialTypeHint: '',
-    uploadedCategoryCode: ''
+    uploadedCategoryCode: '',
+    contentType: '',
+    fileSizeKb: 0
   })
 }
 
@@ -330,6 +395,8 @@ async function handleMaterialFileChange(file: File | undefined, item: EditableMa
     const uploadResult = await uploadMaterialFile(file)
     item.fileName = uploadResult.fileName || file.name
     item.fileUrl = uploadResult.fileUrl
+    item.contentType = uploadResult.contentType || file.type
+    item.fileSizeKb = Math.ceil((uploadResult.size || file.size) / 1024)
     if (!item.materialTypeHint) {
       item.materialTypeHint = inferMaterialHint(item.fileName)
     }
@@ -385,6 +452,26 @@ async function submitAudit() {
 
   loading.value = true
   try {
+    const preprocessResponses = await Promise.all(
+      materials.value.map((item) =>
+        preprocessMaterial({
+          businessId: form.businessId,
+          scene: 'MATERIAL_AUDIT',
+          fileUrl: item.fileUrl,
+          fileName: item.fileName,
+          materialTypeHint: item.materialTypeHint,
+          contentType: item.contentType || undefined,
+          fileSizeKb: item.fileSizeKb
+        })
+      )
+    )
+    const preprocessFailure = preprocessResponses.find((item) => item.code !== 200 || item.data.code !== 200)
+    if (preprocessFailure) {
+      ElMessage.error(preprocessFailure.data?.message || preprocessFailure.message || '材料预处理失败')
+      return
+    }
+    preprocessResults.value = preprocessResponses.map((item) => item.data.data)
+
     const response = await auditApplicationMaterials({
       businessId: form.businessId,
       applicationType: form.applicationType,
@@ -453,6 +540,28 @@ function riskTagType(level: RiskLevel) {
   if (level === 'HIGH') return 'danger'
   if (level === 'MEDIUM') return 'warning'
   return 'info'
+}
+
+function clarityText(level: ClarityLevel) {
+  const map: Record<ClarityLevel, string> = {
+    CLEAR: '清晰',
+    REVIEW: '待复核',
+    BLURRY: '模糊',
+    NOT_IMAGE: '非图片'
+  }
+  return map[level]
+}
+
+function clarityTagType(level: ClarityLevel) {
+  if (level === 'CLEAR') return 'success'
+  if (level === 'BLURRY') return 'danger'
+  if (level === 'REVIEW') return 'warning'
+  return 'info'
+}
+
+function formatPreprocessIssues(row: MaterialPreprocessData) {
+  const issues = [...row.format_validation.issues, ...row.clarity.issues]
+  return issues.length ? issues.join('、') : row.clarity.suggestion
 }
 
 function formatPercent(value?: number) {
@@ -672,6 +781,16 @@ function inferMaterialHint(fileName: string) {
 .result-actions {
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.preprocess-panel {
+  margin-bottom: 16px;
+}
+
+.clarity-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

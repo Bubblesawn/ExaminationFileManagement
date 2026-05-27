@@ -12,9 +12,31 @@ export interface AiImageTaskRequest {
   materialTypeHint?: string
 }
 
+export interface MaterialPreprocessRequest extends AiImageTaskRequest {
+  contentType?: string
+  fileSizeKb?: number
+}
+
 export interface ImageQualityResult {
   readable: boolean
   issues: string[]
+}
+
+export interface MaterialFormatValidationResult {
+  valid: boolean
+  file_suffix: string
+  content_type?: string
+  max_size_kb: number
+  issues: string[]
+}
+
+export interface ImageClarityResult {
+  image: boolean
+  score: number
+  level: 'CLEAR' | 'REVIEW' | 'BLURRY' | 'NOT_IMAGE'
+  readable: boolean
+  issues: string[]
+  suggestion: string
 }
 
 export interface MaterialCategoryCandidate {
@@ -144,6 +166,21 @@ export interface ApplicationMaterialAuditData {
   need_manual_review: boolean
 }
 
+export interface MaterialPreprocessData {
+  business_id?: number
+  file_url: string
+  file_name?: string
+  scene?: string
+  format_validation: MaterialFormatValidationResult
+  clarity: ImageClarityResult
+  category_code: string
+  category_name: string
+  confidence: number
+  candidates: MaterialCategoryCandidate[]
+  suggested_action: SuggestedAction
+  need_manual_review: boolean
+}
+
 export interface AlgorithmResponse<T = AiRecognitionData> {
   code: number
   message: string
@@ -226,6 +263,16 @@ export function auditApplicationMaterials(payload: ApplicationMaterialAuditReque
     '/ai/application-material-audit',
     payload
   )
+}
+
+/**
+ * @brief 调用材料预处理接口。
+ *
+ * @param payload 材料预处理请求参数。
+ * @return 后端封装后的材料格式校验、清晰度检测和基础分类结果。
+ */
+export function preprocessMaterial(payload: MaterialPreprocessRequest) {
+  return http.post<unknown, ApiResult<AlgorithmResponse<MaterialPreprocessData>>>('/ai/material-preprocess', payload)
 }
 
 /**
