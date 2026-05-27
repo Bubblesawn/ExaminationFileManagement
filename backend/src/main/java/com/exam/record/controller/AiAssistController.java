@@ -5,6 +5,7 @@ import com.exam.record.dto.AiChatDTO;
 import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
+import com.exam.record.dto.MaterialPreprocessDTO;
 import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
@@ -56,6 +57,17 @@ public class AiAssistController {
     @PostMapping("/materials/upload")
     public Result<MaterialUploadVO> uploadMaterial(MultipartFile file) {
         return Result.success(aiAssistService.uploadMaterial(file));
+    }
+
+    /**
+     * @brief 调用材料预处理能力。
+     *
+     * @param dto 材料预处理请求对象。
+     * @return 材料格式校验、图片清晰度检测和基础分类算法响应。
+     */
+    @PostMapping("/material-preprocess")
+    public Result<AlgorithmResponseVO> preprocessMaterial(@Valid @RequestBody MaterialPreprocessDTO dto) {
+        return Result.success(aiAssistService.preprocessMaterial(dto));
     }
 
     /**

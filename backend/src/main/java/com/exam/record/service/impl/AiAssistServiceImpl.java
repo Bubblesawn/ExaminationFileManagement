@@ -5,6 +5,7 @@ import com.exam.record.dto.AiChatDTO;
 import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
+import com.exam.record.dto.MaterialPreprocessDTO;
 import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
@@ -121,6 +122,17 @@ public class AiAssistServiceImpl implements AiAssistService {
                 "/uploads/materials/" + dateDirectoryName + "/" + savedFilename,
                 file.getContentType(),
                 file.getSize());
+    }
+
+    /**
+     * @brief 调用算法服务材料预处理接口。
+     *
+     * @param dto 材料预处理请求对象。
+     * @return 算法服务响应。
+     */
+    @Override
+    public AlgorithmResponseVO preprocessMaterial(MaterialPreprocessDTO dto) {
+        return callAlgorithm("/material-preprocess", dto, "材料预处理", dto.getBusinessId(), dto.getScene());
     }
 
     /**

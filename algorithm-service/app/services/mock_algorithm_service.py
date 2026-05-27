@@ -10,9 +10,13 @@ from app.models.schemas import (
     ChatRequest,
     ClassifiedApplicationMaterial,
     ImageClassifyResult,
+    ImageClarityResult,
     ImageQualityResult,
     ImageSegmentResult,
     ImageTaskRequest,
+    MaterialFormatValidationResult,
+    MaterialPreprocessRequest,
+    MaterialPreprocessResult,
     MissingMaterialReminder,
     MaterialSegment,
     MaterialCategoryCandidate,
@@ -39,7 +43,10 @@ from app.services.image_analysis_service import (
 )
 
 SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+SUPPORTED_DOCUMENT_SUFFIXES = (".pdf",)
+SUPPORTED_MATERIAL_SUFFIXES = SUPPORTED_IMAGE_SUFFIXES + SUPPORTED_DOCUMENT_SUFFIXES
 SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
+MAX_MATERIAL_SIZE_KB = 10 * 1024
 MIN_AUTO_ACCEPT_CONFIDENCE = 0.85
 MIN_REVIEW_CONFIDENCE = 0.6
 UNKNOWN_MATERIAL_CODE = "UNKNOWN"
@@ -298,6 +305,99 @@ def _check_image_quality(file_url: str, analysis: ImageAnalysis | None = None) -
     return ImageQualityResult(readable=not issues, issues=issues)
 
 
+def _extract_file_suffix(file_url: str, file_name: str | None = None) -> str:
+    """@brief 提取材料文件后缀。
+
+    @param file_url 材料文件地址。
+    @param file_name 原始文件名。
+    @return 小写文件后缀，无法识别时返回空字符串。
+    """
+    source = file_name or file_url.split("?")[0].split("#")[0]
+    last_segment = source.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if "." not in last_segment:
+        return ""
+    return "." + last_segment.rsplit(".", 1)[-1].lower()
+
+
+def _validate_material_format(request: MaterialPreprocessRequest) -> MaterialFormatValidationResult:
+    """@brief 校验材料文件格式和大小。
+
+    @param request 材料预处理请求。
+    @return 材料格式校验结果。
+    """
+    file_suffix = _extract_file_suffix(request.file_url, request.file_name)
+    issues = []
+    if file_suffix not in SUPPORTED_MATERIAL_SUFFIXES:
+        issues.append("UNSUPPORTED_MATERIAL_FORMAT")
+    if request.file_size_kb is not None and request.file_size_kb > MAX_MATERIAL_SIZE_KB:
+        issues.append("FILE_SIZE_EXCEEDED")
+    if request.content_type and file_suffix in SUPPORTED_IMAGE_SUFFIXES and not request.content_type.startswith("image/"):
+        issues.append("CONTENT_TYPE_MISMATCH")
+    if request.content_type and file_suffix == ".pdf" and request.content_type != "application/pdf":
+        issues.append("CONTENT_TYPE_MISMATCH")
+    return MaterialFormatValidationResult(
+        valid=not issues,
+        file_suffix=file_suffix,
+        content_type=request.content_type,
+        max_size_kb=MAX_MATERIAL_SIZE_KB,
+        issues=issues,
+    )
+
+
+def _detect_image_clarity(file_url: str, file_suffix: str) -> ImageClarityResult:
+    """@brief 根据材料地址模拟图片清晰度检测。
+
+    @param file_url 材料文件地址。
+    @param file_suffix 材料文件后缀。
+    @return 图片清晰度检测结果。
+    """
+    if file_suffix not in SUPPORTED_IMAGE_SUFFIXES:
+        return ImageClarityResult(
+            image=False,
+            score=0,
+            level="NOT_IMAGE",
+            readable=True,
+            issues=[],
+            suggestion="非图片材料已跳过清晰度检测，请按格式校验结果继续处理。",
+        )
+
+    lower_url = file_url.lower()
+    analysis = analyze_image(file_url)
+    issues = list(analysis.issues)
+    score = estimate_visual_confidence(0.92, analysis)
+    if any(keyword in lower_url for keyword in ["blur", "low", "unclear"]):
+        issues.append("LOW_DEFINITION")
+        score = min(score, 0.42)
+    if any(keyword in lower_url for keyword in ["dark", "shadow"]):
+        issues.append("LOW_BRIGHTNESS")
+        score = min(score, 0.58)
+    if any(keyword in lower_url for keyword in ["small", "thumbnail"]):
+        issues.append("LOW_RESOLUTION")
+        score = min(score, 0.55)
+    if any(keyword in lower_url for keyword in ["blocked", "cover", "occlusion"]):
+        issues.append("OCCLUSION")
+        score = min(score, 0.5)
+
+    issues = list(dict.fromkeys(issues))
+    if score >= 0.8:
+        level = "CLEAR"
+        suggestion = "图片清晰度满足自动预处理要求。"
+    elif score >= 0.6:
+        level = "REVIEW"
+        suggestion = "图片基本可读，建议进入人工复核。"
+    else:
+        level = "BLURRY"
+        suggestion = "图片清晰度不足，建议退回并重新上传。"
+    return ImageClarityResult(
+        image=True,
+        score=score,
+        level=level,
+        readable=score >= 0.6 and "OCCLUSION" not in issues,
+        issues=issues,
+        suggestion=suggestion,
+    )
+
+
 def _score_category(
         category_code: str,
         rule: dict,
@@ -366,6 +466,23 @@ def _build_material_candidates(
             )
         )
     return candidates[:3]
+
+
+def _build_preprocess_candidates(request: MaterialPreprocessRequest) -> list[MaterialCategoryCandidate]:
+    """@brief 生成材料预处理分类候选结果。
+
+    @param request 材料预处理请求。
+    @return 按置信度倒序排列的材料类别候选项。
+    """
+    image_request = ImageTaskRequest(
+        file_url=request.file_url,
+        business_id=request.business_id,
+        scene=request.scene,
+        file_name=request.file_name,
+        material_type_hint=request.material_type_hint,
+    )
+    analysis = analyze_image(request.file_url)
+    return _build_material_candidates(image_request, analysis)
 
 
 def _match_material_category(request: ImageTaskRequest, analysis: ImageAnalysis | None = None) -> str:
@@ -841,6 +958,47 @@ def classify_image(request: ImageTaskRequest) -> dict:
         quality=quality,
         suggested_action=suggested_action,
         need_manual_review=need_manual_review,
+    )
+    return _success(result.model_dump())
+
+
+def preprocess_material(request: MaterialPreprocessRequest) -> dict:
+    """@brief 执行材料格式校验、图片清晰度检测和基础分类。
+
+    @param request 材料预处理请求。
+    @return 材料预处理统一响应。
+    """
+    if not request.file_url.strip():
+        return _fail(400, "材料文件地址不能为空")
+    format_validation = _validate_material_format(request)
+    clarity = _detect_image_clarity(request.file_url, format_validation.file_suffix)
+    candidates = _build_preprocess_candidates(request)
+    best_candidate = candidates[0]
+
+    if not format_validation.valid:
+        suggested_action = "REJECT"
+    elif not clarity.readable:
+        suggested_action = "REJECT"
+    elif best_candidate.confidence >= MIN_AUTO_ACCEPT_CONFIDENCE:
+        suggested_action = "ACCEPT"
+    elif best_candidate.confidence >= MIN_REVIEW_CONFIDENCE:
+        suggested_action = "REVIEW"
+    else:
+        suggested_action = "REJECT"
+
+    result = MaterialPreprocessResult(
+        business_id=request.business_id,
+        file_url=request.file_url,
+        file_name=request.file_name,
+        scene=request.scene,
+        format_validation=format_validation,
+        clarity=clarity,
+        category_code=best_candidate.category_code,
+        category_name=best_candidate.category_name,
+        confidence=best_candidate.confidence,
+        candidates=candidates,
+        suggested_action=suggested_action,
+        need_manual_review=suggested_action != "ACCEPT",
     )
     return _success(result.model_dump())
 

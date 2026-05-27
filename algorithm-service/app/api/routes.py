@@ -1,9 +1,17 @@
 from fastapi import APIRouter, Depends
 
-from app.models.schemas import AlgorithmResponse, ApplicationMaterialAuditRequest, ChatRequest, ImageTaskRequest, SpeechRequest
+from app.models.schemas import (
+    AlgorithmResponse,
+    ApplicationMaterialAuditRequest,
+    ChatRequest,
+    ImageTaskRequest,
+    MaterialPreprocessRequest,
+    SpeechRequest,
+)
 from app.api.security import verify_internal_api_key
 from app.services.mock_algorithm_service import (
     audit_application_materials,
+    preprocess_material,
     classify_image,
     detect_objects,
     segment_image,
@@ -23,6 +31,16 @@ def image_classify(request: ImageTaskRequest) -> dict:
     @return 图像分类统一响应。
     """
     return classify_image(request)
+
+
+@router.post("/material-preprocess", response_model=AlgorithmResponse)
+def material_preprocess(request: MaterialPreprocessRequest) -> dict:
+    """@brief 执行材料上传后的基础预处理。
+
+    @param request 材料预处理请求。
+    @return 材料格式校验、图片清晰度检测和基础分类统一响应。
+    """
+    return preprocess_material(request)
 
 
 @router.post("/application-material-audit", response_model=AlgorithmResponse)

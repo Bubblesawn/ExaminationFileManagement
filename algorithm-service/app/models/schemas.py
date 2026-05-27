@@ -13,6 +13,18 @@ class ImageTaskRequest(BaseModel):
     material_type_hint: str | None = Field(default=None, description="前端或业务系统提供的材料类型提示")
 
 
+class MaterialPreprocessRequest(BaseModel):
+    """@brief 材料预处理请求。"""
+
+    file_url: str = Field(..., description="材料文件地址")
+    business_id: int | None = Field(default=None, description="业务ID")
+    scene: str | None = Field(default=None, description="业务场景，例如 MATERIAL_AUDIT、EXEMPTION")
+    file_name: str | None = Field(default=None, description="原始文件名")
+    content_type: str | None = Field(default=None, description="文件 MIME 类型")
+    file_size_kb: int | None = Field(default=None, ge=0, description="文件大小，单位 KB")
+    material_type_hint: str | None = Field(default=None, description="前端或业务系统提供的材料类型提示")
+
+
 class ApplicationMaterialItemRequest(BaseModel):
     """@brief 申请材料核验单项材料请求。"""
 
@@ -47,6 +59,27 @@ class ImageQualityResult(BaseModel):
     issues: list[str] = Field(default_factory=list, description="质量问题列表")
 
 
+class MaterialFormatValidationResult(BaseModel):
+    """@brief 材料格式校验结果。"""
+
+    valid: bool = Field(..., description="材料格式是否可被系统处理")
+    file_suffix: str = Field(..., description="识别到的文件后缀")
+    content_type: str | None = Field(default=None, description="文件 MIME 类型")
+    max_size_kb: int = Field(..., description="允许上传的最大文件大小，单位 KB")
+    issues: list[str] = Field(default_factory=list, description="格式问题列表")
+
+
+class ImageClarityResult(BaseModel):
+    """@brief 图片清晰度检测结果。"""
+
+    image: bool = Field(..., description="当前材料是否为图片")
+    score: float = Field(..., ge=0, le=1, description="清晰度评分")
+    level: Literal["CLEAR", "REVIEW", "BLURRY", "NOT_IMAGE"] = Field(..., description="清晰度等级")
+    readable: bool = Field(..., description="图片是否清晰可读")
+    issues: list[str] = Field(default_factory=list, description="清晰度问题列表")
+    suggestion: str = Field(..., description="处理建议")
+
+
 class MaterialCategoryCandidate(BaseModel):
     """@brief 材料类别候选项。"""
 
@@ -65,6 +98,23 @@ class ImageClassifyResult(BaseModel):
     confidence: float = Field(..., ge=0, le=1, description="最高置信度")
     candidates: list[MaterialCategoryCandidate] = Field(default_factory=list, description="候选材料类别")
     quality: ImageQualityResult = Field(..., description="图片质量检查结果")
+    suggested_action: Literal["ACCEPT", "REVIEW", "REJECT"] = Field(..., description="建议动作")
+    need_manual_review: bool = Field(..., description="是否需要人工复核")
+
+
+class MaterialPreprocessResult(BaseModel):
+    """@brief 材料预处理结果。"""
+
+    business_id: int | None = Field(default=None, description="业务ID")
+    file_url: str = Field(..., description="材料文件地址")
+    file_name: str | None = Field(default=None, description="原始文件名")
+    scene: str | None = Field(default=None, description="业务场景")
+    format_validation: MaterialFormatValidationResult = Field(..., description="材料格式校验结果")
+    clarity: ImageClarityResult = Field(..., description="图片清晰度检测结果")
+    category_code: str = Field(..., description="最可能的材料类别编码")
+    category_name: str = Field(..., description="最可能的材料类别名称")
+    confidence: float = Field(..., ge=0, le=1, description="最高分类置信度")
+    candidates: list[MaterialCategoryCandidate] = Field(default_factory=list, description="候选材料类别")
     suggested_action: Literal["ACCEPT", "REVIEW", "REJECT"] = Field(..., description="建议动作")
     need_manual_review: bool = Field(..., description="是否需要人工复核")
 

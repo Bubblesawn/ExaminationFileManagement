@@ -4,6 +4,7 @@ import com.exam.record.dto.AiChatDTO;
 import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
+import com.exam.record.dto.MaterialPreprocessDTO;
 import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
 import org.springframework.web.multipart.MultipartFile;
@@ -28,6 +29,14 @@ public interface AiAssistService {
      * @return 可用于算法识别的材料访问信息。
      */
     MaterialUploadVO uploadMaterial(MultipartFile file);
+
+    /**
+     * @brief 调用算法服务材料预处理接口。
+     *
+     * @param dto 材料预处理请求对象。
+     * @return 算法服务响应。
+     */
+    AlgorithmResponseVO preprocessMaterial(MaterialPreprocessDTO dto);
 
     /**
      * @brief 调用算法服务申请材料智能核验接口。
