@@ -12,7 +12,14 @@
         <el-menu-item index="/transfers"><el-icon><Sort /></el-icon><span>转入转出</span></el-menu-item>
         <el-menu-item index="/graduations"><el-icon><Medal /></el-icon><span>毕业管理</span></el-menu-item>
         <el-menu-item index="/ai"><el-icon><Service /></el-icon><span>智能辅助</span></el-menu-item>
-        <el-menu-item index="/system"><el-icon><Setting /></el-icon><span>系统管理</span></el-menu-item>
+        <el-sub-menu index="/system-manage">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>系统管理</span>
+          </template>
+          <el-menu-item index="/system"><span>用户管理</span></el-menu-item>
+          <el-menu-item index="/system/menus"><span>菜单管理</span></el-menu-item>
+        </el-sub-menu>
       </el-menu>
     </el-aside>
     <el-container>
