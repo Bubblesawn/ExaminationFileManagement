@@ -26,3 +26,8 @@ springdoc:
 
 knife4j:
   enable: true
+
+auth:
+  token:
+    secret: examination-file-management-local-secret
+    expire-seconds: 7200

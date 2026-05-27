@@ -15,6 +15,17 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalExceptionHandler {
 
     /**
+     * @brief 处理业务异常。
+     *
+     * @param exception 业务异常。
+     * @return 统一失败响应。
+     */
+    @ExceptionHandler(BusinessException.class)
+    public Result<Void> handleBusinessException(BusinessException exception) {
+        return Result.fail(exception.getCode(), exception.getMessage());
+    }
+
+    /**
      * @brief 处理请求体参数校验异常。
      *
      * @param exception 参数校验异常。
@@ -51,4 +62,3 @@ public class GlobalExceptionHandler {
         return Result.fail(500, "系统异常：" + exception.getMessage());
     }
 }
-

@@ -9,6 +9,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+    private final AuthInterceptor authInterceptor;
+
+    /**
+     * @brief 构造 Web MVC 配置。
+     *
+     * @param authInterceptor Token 认证拦截器。
+     */
+    public WebConfig(AuthInterceptor authInterceptor) {
+        this.authInterceptor = authInterceptor;
+    }
 
     /**
      * @brief 配置跨域访问规则，便于前端开发环境联调。
@@ -23,5 +33,25 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .allowCredentials(true);
     }
-}
 
+    /**
+     * @brief 注册 Token 认证拦截规则。
+     *
+     * @param registry 拦截器注册器。
+     */
+    @Override
+    public void addInterceptors(org.springframework.web.servlet.config.annotation.InterceptorRegistry registry) {
+        registry.addInterceptor(authInterceptor)
+                .addPathPatterns("/api/**")
+                .excludePathPatterns(
+                        "/api/auth/login",
+                        "/api/health",
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
+                        "/doc.html",
+                        "/webjars/**",
+                        "/favicon.ico"
+                );
+    }
+}

@@ -2,7 +2,7 @@ SET NAMES utf8mb4;
 
 USE exam_record;
 
--- 系统管理测试用户：密码统一使用占位哈希，第二阶段登录接口实现时替换为真实 BCrypt 哈希。
+-- 系统管理测试用户：当前登录接口兼容 {noop} 明文占位，后续用户管理接口可改为 {sha256} 哈希。
 INSERT INTO sys_user (username, password, real_name, phone, email, status)
 SELECT 'admin', '{noop}admin123', '系统管理员', '13800000001', 'admin@example.com', 'ENABLED'
 WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE username = 'admin');
