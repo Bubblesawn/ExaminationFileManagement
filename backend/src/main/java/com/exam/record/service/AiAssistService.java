@@ -5,6 +5,8 @@ import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
 import com.exam.record.vo.AlgorithmResponseVO;
+import com.exam.record.vo.MaterialUploadVO;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * @brief 智能辅助调用服务。
@@ -18,6 +20,14 @@ public interface AiAssistService {
      * @return 算法服务响应。
      */
     AlgorithmResponseVO classifyImage(AiImageTaskDTO dto);
+
+    /**
+     * @brief 保存上传的材料图片文件。
+     *
+     * @param file 前端上传的材料文件。
+     * @return 可用于算法识别的材料访问信息。
+     */
+    MaterialUploadVO uploadMaterial(MultipartFile file);
 
     /**
      * @brief 调用算法服务申请材料智能核验接口。

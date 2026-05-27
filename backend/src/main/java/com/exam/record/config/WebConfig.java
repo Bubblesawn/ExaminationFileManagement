@@ -1,8 +1,12 @@
 package com.exam.record.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.nio.file.Path;
 
 /**
  * @brief Web MVC 基础配置。
@@ -11,6 +15,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebConfig implements WebMvcConfigurer {
     private final AuthInterceptor authInterceptor;
     private final OperationLogInterceptor operationLogInterceptor;
+    private final Path materialUploadPath;
 
     /**
      * @brief 构造 Web MVC 配置。
@@ -18,9 +23,13 @@ public class WebConfig implements WebMvcConfigurer {
      * @param authInterceptor Token 认证拦截器。
      * @param operationLogInterceptor 操作日志拦截器。
      */
-    public WebConfig(AuthInterceptor authInterceptor, OperationLogInterceptor operationLogInterceptor) {
+    public WebConfig(
+            AuthInterceptor authInterceptor,
+            OperationLogInterceptor operationLogInterceptor,
+            @Value("${material.upload.root:uploads/materials}") String materialUploadRoot) {
         this.authInterceptor = authInterceptor;
         this.operationLogInterceptor = operationLogInterceptor;
+        this.materialUploadPath = Path.of(materialUploadRoot).toAbsolutePath().normalize();
     }
 
     /**
@@ -35,6 +44,17 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true);
+    }
+
+    /**
+     * @brief 暴露材料上传目录的静态访问路径。
+     *
+     * @param registry 静态资源注册器。
+     */
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/uploads/materials/**")
+                .addResourceLocations(materialUploadPath.toUri().toString() + "/");
     }
 
     /**

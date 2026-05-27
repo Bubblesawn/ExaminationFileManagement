@@ -52,8 +52,23 @@
                 </el-button>
               </div>
               <el-form label-position="top">
-                <el-form-item label="图片地址">
-                  <el-input v-model="item.fileUrl" clearable />
+                <el-form-item label="材料文件">
+                  <div class="upload-field">
+                    <el-upload
+                      accept=".jpg,.jpeg,.png,.bmp,.webp"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      :on-change="createMaterialUploadHandler(item)"
+                    >
+                      <el-button :loading="item.uploading" type="primary" plain>
+                        {{ item.fileName ? '重新上传' : '上传材料' }}
+                      </el-button>
+                    </el-upload>
+                    <span class="upload-name">{{ item.fileName || '支持 jpg、jpeg、png、bmp、webp' }}</span>
+                  </div>
+                </el-form-item>
+                <el-form-item v-if="item.fileUrl" label="材料访问地址">
+                  <el-input v-model="item.fileUrl" readonly />
                 </el-form-item>
                 <el-row :gutter="10">
                   <el-col :xs="24" :sm="12">
@@ -205,8 +220,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { UploadFile } from 'element-plus'
 import {
   auditApplicationMaterials,
+  uploadMaterialFile,
   type ApplicationMaterialAuditData,
   type SuggestedAction
 } from '../../api/ai'
@@ -218,6 +235,7 @@ interface EditableMaterial {
   fileName: string
   materialTypeHint: string
   uploadedCategoryCode: string
+  uploading?: boolean
 }
 
 type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
@@ -246,19 +264,10 @@ const form = reactive({
 const materials = ref<EditableMaterial[]>([
   {
     localId: 1,
-    materialId: 101,
-    fileUrl: 'https://example.com/mock/idcard-sample.jpg',
-    fileName: 'idcard-sample.jpg',
-    materialTypeHint: '身份证',
-    uploadedCategoryCode: 'ID_CARD'
-  },
-  {
-    localId: 2,
-    materialId: 102,
-    fileUrl: 'https://example.com/mock/transcript-sample.jpg',
-    fileName: 'transcript-sample.jpg',
-    materialTypeHint: '成绩单',
-    uploadedCategoryCode: 'TRANSCRIPT'
+    fileUrl: '',
+    fileName: '',
+    materialTypeHint: '',
+    uploadedCategoryCode: ''
   }
 ])
 const loading = ref(false)
@@ -290,12 +299,47 @@ function removeMaterial(index: number) {
 }
 
 /**
+ * @brief 创建当前材料行的上传回调。
+ *
+ * @param item 当前正在编辑的材料记录。
+ * @return Element Plus 上传控件变更处理函数。
+ */
+function createMaterialUploadHandler(item: EditableMaterial) {
+  return (uploadFile: UploadFile) => handleMaterialFileChange(uploadFile.raw, item)
+}
+
+/**
+ * @brief 上传申请材料文件并回填识别所需地址。
+ *
+ * @param file 用户在上传控件中选择的材料文件。
+ * @param item 当前正在编辑的材料记录。
+ */
+async function handleMaterialFileChange(file: File | undefined, item: EditableMaterial) {
+  if (!file) return
+
+  item.uploading = true
+  try {
+    const uploadResult = await uploadMaterialFile(file)
+    item.fileName = uploadResult.fileName || file.name
+    item.fileUrl = uploadResult.fileUrl
+    if (!item.materialTypeHint) {
+      item.materialTypeHint = inferMaterialHint(item.fileName)
+    }
+    ElMessage.success('材料上传成功，可发起智能核验')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '材料上传失败')
+  } finally {
+    item.uploading = false
+  }
+}
+
+/**
  * @brief 发起申请材料智能核验联调请求。
  */
 async function submitAudit() {
   const invalidItem = materials.value.find((item) => !item.fileUrl.trim())
   if (invalidItem) {
-    ElMessage.warning('请补充所有材料的图片地址')
+    ElMessage.warning('请先上传所有申请材料')
     return
   }
 
@@ -314,12 +358,12 @@ async function submitAudit() {
       }))
     })
 
-    if (response.code !== 200 || response.data.code !== 200) {
-      ElMessage.error(response.data?.message || response.message || '申请材料智能核验失败')
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '申请材料智能核验失败')
       return
     }
 
-    auditResult.value = response.data.data
+    auditResult.value = response.data
     ElMessage.success('申请材料智能核验完成')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '智能辅助服务暂不可用')
@@ -377,6 +421,23 @@ function formatPercent(value?: number) {
 
 function formatUploadedCategory(code?: string) {
   return materialTypeOptions.find((item) => item.value === code)?.label ?? code ?? '-'
+}
+
+/**
+ * @brief 根据材料文件名推断材料类型提示。
+ *
+ * @param fileName 上传材料文件名。
+ * @return 可传递给算法服务的材料类型提示。
+ */
+function inferMaterialHint(fileName: string) {
+  const normalizedName = fileName.toLowerCase()
+  if (normalizedName.includes('id') || normalizedName.includes('身份证')) return '身份证'
+  if (normalizedName.includes('transcript') || normalizedName.includes('score') || normalizedName.includes('成绩')) return '成绩单'
+  if (normalizedName.includes('diploma') || normalizedName.includes('毕业') || normalizedName.includes('学历')) return '毕业证'
+  if (normalizedName.includes('exemption') || normalizedName.includes('免考')) return '免考证明'
+  if (normalizedName.includes('ticket') || normalizedName.includes('准考证')) return '准考证'
+  if (normalizedName.includes('photo') || normalizedName.includes('照片')) return '照片'
+  return ''
 }
 </script>
 
@@ -441,6 +502,21 @@ function formatUploadedCategory(code?: string) {
   margin-bottom: 8px;
   color: #1f2937;
   font-weight: 700;
+}
+
+.upload-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.upload-name {
+  overflow: hidden;
+  color: #667085;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .submit-button,

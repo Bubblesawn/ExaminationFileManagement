@@ -7,11 +7,13 @@ import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
 import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
+import com.exam.record.vo.MaterialUploadVO;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * @brief 智能辅助后端封装接口。
@@ -43,6 +45,17 @@ public class AiAssistController {
     @PostMapping("/image-classify")
     public Result<AlgorithmResponseVO> classifyImage(@Valid @RequestBody AiImageTaskDTO dto) {
         return Result.success(aiAssistService.classifyImage(dto));
+    }
+
+    /**
+     * @brief 上传真实材料文件。
+     *
+     * @param file 前端上传的材料图片文件。
+     * @return 材料文件访问地址和元信息。
+     */
+    @PostMapping("/materials/upload")
+    public Result<MaterialUploadVO> uploadMaterial(MultipartFile file) {
+        return Result.success(aiAssistService.uploadMaterial(file));
     }
 
     /**

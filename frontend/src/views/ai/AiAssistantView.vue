@@ -17,8 +17,23 @@
                 <el-form-item label="任务类型">
                   <el-segmented v-model="form.taskType" :options="taskOptions" />
                 </el-form-item>
-                <el-form-item label="图片地址">
-                  <el-input v-model="form.fileUrl" placeholder="请输入图片访问地址" clearable />
+                <el-form-item label="材料文件">
+                  <div class="upload-field">
+                    <el-upload
+                      accept=".jpg,.jpeg,.png,.bmp,.webp"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      :on-change="handleRecognitionUploadChange"
+                    >
+                      <el-button :loading="uploading" type="primary" plain>
+                        {{ form.fileName ? '重新上传' : '上传材料' }}
+                      </el-button>
+                    </el-upload>
+                    <span class="upload-name">{{ form.fileName || '支持 jpg、jpeg、png、bmp、webp' }}</span>
+                  </div>
+                </el-form-item>
+                <el-form-item v-if="form.fileUrl" label="材料访问地址">
+                  <el-input v-model="form.fileUrl" readonly />
                 </el-form-item>
                 <el-form-item label="文件名称">
                   <el-input v-model="form.fileName" placeholder="例如 idcard-sample.jpg" clearable />
@@ -87,9 +102,16 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { UploadFile } from 'element-plus'
 import AiChatPanel from '../../components/ai/AiChatPanel.vue'
 import RecognitionResultPanel from '../../components/ai/RecognitionResultPanel.vue'
-import { recognizeImage, type AiRecognitionData, type AiTaskType, type SuggestedAction } from '../../api/ai'
+import {
+  recognizeImage,
+  uploadMaterialFile,
+  type AiRecognitionData,
+  type AiTaskType,
+  type SuggestedAction
+} from '../../api/ai'
 
 interface ConfirmRecord {
   id: number
@@ -113,14 +135,15 @@ const actionTextMap: Record<SuggestedAction, string> = {
 
 const form = reactive({
   taskType: 'classify' as AiTaskType,
-  fileUrl: 'https://example.com/mock/idcard-sample.jpg',
-  fileName: 'idcard-sample.jpg',
+  fileUrl: '',
+  fileName: '',
   businessId: 2026052701,
   scene: 'MATERIAL_AUDIT',
-  materialTypeHint: '身份证'
+  materialTypeHint: ''
 })
 
 const loading = ref(false)
+const uploading = ref(false)
 const activeTab = ref('recognition')
 const recognitionResult = ref<AiRecognitionData | null>(null)
 const confirmedRecords = ref<ConfirmRecord[]>([])
@@ -128,11 +151,44 @@ const confirmedRecords = ref<ConfirmRecord[]>([])
 const currentTaskLabel = computed(() => taskOptions.find((item) => item.value === form.taskType)?.label ?? '智能识别')
 
 /**
+ * @brief 处理识别材料上传控件的文件变更。
+ *
+ * @param uploadFile Element Plus 上传文件对象。
+ */
+function handleRecognitionUploadChange(uploadFile: UploadFile) {
+  handleRecognitionFileChange(uploadFile.raw)
+}
+
+/**
+ * @brief 上传识别材料并回填算法入参。
+ *
+ * @param file 用户选择的材料图片文件。
+ */
+async function handleRecognitionFileChange(file: File | undefined) {
+  if (!file) return
+
+  uploading.value = true
+  try {
+    const uploadResult = await uploadMaterialFile(file)
+    form.fileName = uploadResult.fileName || file.name
+    form.fileUrl = uploadResult.fileUrl
+    if (!form.materialTypeHint) {
+      form.materialTypeHint = inferMaterialHint(form.fileName)
+    }
+    ElMessage.success('材料上传成功，可发起识别')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '材料上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/**
  * @brief 发起图片智能识别，并将算法结果送入人工确认组件。
  */
 async function submitRecognition() {
   if (!form.fileUrl.trim()) {
-    ElMessage.warning('请先填写图片地址')
+    ElMessage.warning('请先上传材料文件')
     return
   }
 
@@ -146,12 +202,12 @@ async function submitRecognition() {
       materialTypeHint: form.materialTypeHint
     })
 
-    if (response.code !== 200 || response.data.code !== 200) {
-      ElMessage.error(response.data?.message || response.message || '智能识别调用失败')
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '智能识别调用失败')
       return
     }
 
-    recognitionResult.value = response.data.data
+    recognitionResult.value = response.data
     ElMessage.success('识别结果已生成，请人工确认')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '智能识别服务暂不可用')
@@ -175,6 +231,23 @@ function handleConfirm(payload: { result: AiRecognitionData; remark: string }) {
     remark: payload.remark
   })
   ElMessage.success('人工确认结果已记录')
+}
+
+/**
+ * @brief 根据材料文件名推断材料类型提示。
+ *
+ * @param fileName 上传材料文件名。
+ * @return 可传递给算法服务的材料类型提示。
+ */
+function inferMaterialHint(fileName: string) {
+  const normalizedName = fileName.toLowerCase()
+  if (normalizedName.includes('id') || normalizedName.includes('身份证')) return '身份证'
+  if (normalizedName.includes('transcript') || normalizedName.includes('score') || normalizedName.includes('成绩')) return '成绩单'
+  if (normalizedName.includes('diploma') || normalizedName.includes('毕业') || normalizedName.includes('学历')) return '毕业证'
+  if (normalizedName.includes('exemption') || normalizedName.includes('免考')) return '免考证明'
+  if (normalizedName.includes('ticket') || normalizedName.includes('准考证')) return '准考证'
+  if (normalizedName.includes('photo') || normalizedName.includes('照片')) return '照片'
+  return ''
 }
 </script>
 
@@ -219,6 +292,21 @@ function handleConfirm(payload: { result: AiRecognitionData; remark: string }) {
 .task-panel :deep(.el-segmented),
 .submit-button {
   width: 100%;
+}
+
+.upload-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.upload-name {
+  overflow: hidden;
+  color: #667085;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .record-title {

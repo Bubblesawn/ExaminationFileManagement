@@ -38,6 +38,13 @@ export interface ApplicationMaterialAuditRequest {
   materials: ApplicationMaterialItemRequest[]
 }
 
+export interface MaterialUploadData {
+  fileName: string
+  fileUrl: string
+  contentType?: string
+  size: number
+}
+
 export interface ObjectBoundingBox {
   x: number
   y: number
@@ -188,7 +195,24 @@ const taskUrlMap: Record<AiTaskType, string> = {
  * @return 后端封装后的算法响应。
  */
 export function recognizeImage(taskType: AiTaskType, payload: AiImageTaskRequest) {
-  return http.post<unknown, ApiResult<AlgorithmResponse>>(taskUrlMap[taskType], payload)
+  return http.post<unknown, AlgorithmResponse>(taskUrlMap[taskType], payload)
+}
+
+/**
+ * @brief 上传真实材料文件并返回后端生成的访问地址。
+ *
+ * @param file 前端选择的材料图片文件。
+ * @return 上传后的材料文件元信息。
+ */
+export function uploadMaterialFile(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<unknown, MaterialUploadData>('/ai/materials/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 30000
+  })
 }
 
 /**
@@ -198,7 +222,7 @@ export function recognizeImage(taskType: AiTaskType, payload: AiImageTaskRequest
  * @return 后端封装后的申请材料核验算法响应。
  */
 export function auditApplicationMaterials(payload: ApplicationMaterialAuditRequest) {
-  return http.post<unknown, ApiResult<AlgorithmResponse<ApplicationMaterialAuditData>>>(
+  return http.post<unknown, AlgorithmResponse<ApplicationMaterialAuditData>>(
     '/ai/application-material-audit',
     payload
   )
@@ -211,5 +235,5 @@ export function auditApplicationMaterials(payload: ApplicationMaterialAuditReque
  * @return 后端封装后的问答算法响应。
  */
 export function askAiQuestion(payload: AiChatRequest) {
-  return http.post<unknown, ApiResult<AlgorithmResponse<ChatAnswerData>>>('/ai/chat', payload)
+  return http.post<unknown, AlgorithmResponse<ChatAnswerData>>('/ai/chat', payload)
 }

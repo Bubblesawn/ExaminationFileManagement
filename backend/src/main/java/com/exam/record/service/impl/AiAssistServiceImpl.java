@@ -1,16 +1,28 @@
 package com.exam.record.service.impl;
 
+import com.exam.record.common.BusinessException;
 import com.exam.record.dto.AiChatDTO;
 import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
 import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
+import com.exam.record.vo.MaterialUploadVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * @brief 智能辅助调用服务实现。
@@ -22,8 +34,13 @@ import org.springframework.web.client.RestTemplate;
 @Slf4j
 @Service
 public class AiAssistServiceImpl implements AiAssistService {
+    private static final long MAX_MATERIAL_FILE_SIZE = 10 * 1024 * 1024;
+    private static final Set<String> SUPPORTED_MATERIAL_SUFFIXES = Set.of("jpg", "jpeg", "png", "bmp", "webp");
+    private static final DateTimeFormatter UPLOAD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
+
     private final RestTemplate restTemplate;
     private final String algorithmBaseUrl;
+    private final Path uploadRootPath;
 
     /**
      * @brief 构造智能辅助调用服务。
@@ -33,9 +50,11 @@ public class AiAssistServiceImpl implements AiAssistService {
      */
     public AiAssistServiceImpl(
             RestTemplate restTemplate,
-            @Value("${algorithm.service.base-url}") String algorithmBaseUrl) {
+            @Value("${algorithm.service.base-url}") String algorithmBaseUrl,
+            @Value("${material.upload.root:uploads/materials}") String uploadRoot) {
         this.restTemplate = restTemplate;
         this.algorithmBaseUrl = trimTrailingSlash(algorithmBaseUrl);
+        this.uploadRootPath = Path.of(uploadRoot).toAbsolutePath().normalize();
     }
 
     /**
@@ -47,6 +66,54 @@ public class AiAssistServiceImpl implements AiAssistService {
     @Override
     public AlgorithmResponseVO classifyImage(AiImageTaskDTO dto) {
         return callAlgorithm("/image-classify", dto, "图像分类", dto.getBusinessId(), dto.getScene());
+    }
+
+    /**
+     * @brief 保存上传的真实材料图片。
+     *
+     * @details
+     * 先校验文件大小和图片后缀，再按日期目录写入本地上传目录，
+     * 最后返回可由前端和算法联调继续使用的静态访问地址。
+     *
+     * @param file 前端上传的材料图片文件。
+     * @return 上传后的材料文件元信息。
+     */
+    @Override
+    public MaterialUploadVO uploadMaterial(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(400, "请先选择要上传的材料文件");
+        }
+        if (file.getSize() > MAX_MATERIAL_FILE_SIZE) {
+            throw new BusinessException(400, "材料文件不能超过 10MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        String suffix = getFileSuffix(originalFilename);
+        if (!SUPPORTED_MATERIAL_SUFFIXES.contains(suffix)) {
+            throw new BusinessException(415, "仅支持 jpg、jpeg、png、bmp、webp 格式材料");
+        }
+
+        String dateDirectoryName = LocalDate.now().format(UPLOAD_DATE_FORMATTER);
+        String savedFilename = UUID.randomUUID() + "." + suffix;
+        Path targetDirectory = uploadRootPath.resolve(dateDirectoryName).normalize();
+        Path targetPath = targetDirectory.resolve(savedFilename).normalize();
+        if (!targetPath.startsWith(uploadRootPath)) {
+            throw new BusinessException(400, "材料文件路径不合法");
+        }
+
+        try {
+            Files.createDirectories(targetDirectory);
+            file.transferTo(targetPath);
+        } catch (IOException exception) {
+            log.error("材料文件上传失败 originalFilename={} targetPath={}", originalFilename, targetPath, exception);
+            throw new BusinessException(500, "材料文件保存失败");
+        }
+
+        return new MaterialUploadVO(
+                originalFilename,
+                "/uploads/materials/" + dateDirectoryName + "/" + savedFilename,
+                file.getContentType(),
+                file.getSize());
     }
 
     /**
@@ -168,5 +235,18 @@ public class AiAssistServiceImpl implements AiAssistService {
             return value.substring(0, value.length() - 1);
         }
         return value;
+    }
+
+    /**
+     * @brief 提取上传文件扩展名。
+     *
+     * @param filename 上传文件原始名称。
+     * @return 小写文件扩展名，不包含点号。
+     */
+    private String getFileSuffix(String filename) {
+        if (filename == null || !filename.contains(".")) {
+            return "";
+        }
+        return filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
     }
 }

@@ -154,12 +154,12 @@ async function submitQuestion() {
       scene: scene.value
     })
 
-    if (response.code !== 200 || response.data.code !== 200) {
-      ElMessage.error(response.data?.message || response.message || '智能问答调用失败')
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '智能问答调用失败')
       return
     }
 
-    currentAnswer.value = normalizeAnswer(response.data.data, content)
+    currentAnswer.value = normalizeAnswer(response.data, content)
     saveHistory(currentAnswer.value)
     ElMessage.success('智能问答已返回')
   } catch (error) {
