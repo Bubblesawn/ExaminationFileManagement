@@ -30,7 +30,10 @@ from app.services.image_analysis_service import (
     ImageAnalysis,
     analyze_image,
     estimate_visual_confidence,
+    estimate_material_document_score,
+    has_material_document_evidence,
     looks_like_certificate_photo,
+    looks_like_id_card_document,
     relative_bbox,
     scale_template_bbox,
 )
@@ -39,10 +42,12 @@ SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
 MIN_AUTO_ACCEPT_CONFIDENCE = 0.85
 MIN_REVIEW_CONFIDENCE = 0.6
+UNKNOWN_MATERIAL_CODE = "UNKNOWN"
+UNKNOWN_MATERIAL_NAME = "无法确认材料类别"
 MATERIAL_CATEGORY_RULES = {
     "ID_CARD": {
         "name": "身份证材料",
-        "keywords": ["idcard", "id-card", "identity", "shenfenzheng", "身份证", "证件"],
+        "keywords": ["idcard", "id-card", "identity", "shenfenzheng", "身份证", "证件", "ID_CARD"],
     },
     "ADMISSION_TICKET": {
         "name": "准考证材料",
@@ -288,20 +293,39 @@ def _check_image_quality(file_url: str, analysis: ImageAnalysis | None = None) -
         issues.append("LOW_DEFINITION")
     if any(keyword in lower_url for keyword in ["blocked", "cover", "occlusion"]):
         issues.append("OCCLUSION")
+    if analysis and analysis.loaded and not has_material_document_evidence(analysis):
+        issues.append("MATERIAL_EVIDENCE_INSUFFICIENT")
     return ImageQualityResult(readable=not issues, issues=issues)
 
 
-def _score_category(rule: dict, text: str) -> float:
-    """@brief 根据材料规则计算分类置信度。
+def _score_category(
+        category_code: str,
+        rule: dict,
+        strong_text: str,
+        weak_text: str,
+        analysis: ImageAnalysis | None = None) -> float:
+    """@brief 根据材料规则、文本提示和视觉证据计算分类置信度。
 
     @param rule 材料分类规则。
-    @param text 标准化后的分类文本。
+    @param strong_text 原始文件名等相对可靠文本。
+    @param weak_text 前端选择、业务场景和文件地址等弱提示文本。
+    @param analysis 图片视觉分析结果。
     @return 分类置信度。
     """
-    matched_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in text)
-    if matched_count == 0:
-        return 0.15
-    return min(0.96, 0.62 + matched_count * 0.14)
+    strong_match_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in strong_text)
+    weak_match_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in weak_text)
+    document_score = estimate_material_document_score(analysis) if analysis else 0.0
+    if document_score < 0.48 and not (analysis and looks_like_certificate_photo(analysis)):
+        return 0.08
+    if strong_match_count == 0 and weak_match_count == 0:
+        if category_code == "ID_CARD" and analysis and looks_like_id_card_document(analysis):
+            return estimate_visual_confidence(0.72, analysis)
+        return round(min(0.32, 0.12 + document_score * 0.18), 2)
+
+    confidence = 0.34 + document_score * 0.22 + strong_match_count * 0.18 + min(weak_match_count, 1) * 0.08
+    if category_code == "ID_CARD" and analysis and looks_like_id_card_document(analysis):
+        confidence += 0.1
+    return round(min(0.88, confidence), 2)
 
 
 def _build_material_candidates(
@@ -313,12 +337,13 @@ def _build_material_candidates(
     @param analysis 图片视觉分析结果。
     @return 按置信度倒序排列的材料类别候选项。
     """
-    text = _normalize_text(request.file_url, request.file_name, request.material_type_hint, request.scene)
+    strong_text = _normalize_text(request.file_name)
+    weak_text = _normalize_text(request.material_type_hint)
     candidates = [
         MaterialCategoryCandidate(
             category_code=category_code,
             category_name=rule["name"],
-            confidence=_score_category(rule, text),
+            confidence=_score_category(category_code, rule, strong_text, weak_text, analysis),
         )
         for category_code, rule in MATERIAL_CATEGORY_RULES.items()
     ]
@@ -327,10 +352,20 @@ def _build_material_candidates(
             MaterialCategoryCandidate(
                 category_code="PHOTO",
                 category_name=MATERIAL_CATEGORY_RULES["PHOTO"]["name"],
-                confidence=0.82,
+                confidence=estimate_visual_confidence(0.78, analysis),
             )
         )
-    return sorted(candidates, key=lambda item: item.confidence, reverse=True)[:3]
+    candidates = sorted(candidates, key=lambda item: item.confidence, reverse=True)
+    if candidates[0].confidence < MIN_REVIEW_CONFIDENCE:
+        candidates.insert(
+            0,
+            MaterialCategoryCandidate(
+                category_code=UNKNOWN_MATERIAL_CODE,
+                category_name=UNKNOWN_MATERIAL_NAME,
+                confidence=candidates[0].confidence,
+            )
+        )
+    return candidates[:3]
 
 
 def _match_material_category(request: ImageTaskRequest, analysis: ImageAnalysis | None = None) -> str:
@@ -341,6 +376,15 @@ def _match_material_category(request: ImageTaskRequest, analysis: ImageAnalysis 
     @return 最匹配的材料类别编码。
     """
     return _build_material_candidates(request, analysis)[0].category_code
+
+
+def _is_known_material_category(category_code: str) -> bool:
+    """@brief 判断类别编码是否属于可执行检测和分割的材料类别。
+
+    @param category_code 材料类别编码。
+    @return 已知材料类别返回 True。
+    """
+    return category_code in MATERIAL_CATEGORY_RULES
 
 
 def _build_detected_objects(
@@ -355,6 +399,8 @@ def _build_detected_objects(
     @return 关键区域检测对象列表。
     """
     visual_analysis = analysis or analyze_image(file_url)
+    if not _is_known_material_category(category_code) or not has_material_document_evidence(visual_analysis):
+        return []
     detected_objects = []
     for object_code, object_name, confidence, template_bbox, risk_level, remark in OBJECT_DETECT_RULES.get(
             category_code, OBJECT_DETECT_RULES["ID_CARD"]):
@@ -455,6 +501,8 @@ def _build_segments(category_code: str, file_url: str, analysis: ImageAnalysis |
     @return 可用于材料区域提取的分割结果列表。
     """
     visual_analysis = analysis or analyze_image(file_url)
+    if not _is_known_material_category(category_code) or not has_material_document_evidence(visual_analysis):
+        return []
     image_width = visual_analysis.width or DEFAULT_IMAGE_WIDTH
     image_height = visual_analysis.height or DEFAULT_IMAGE_HEIGHT
     segments = [_build_document_segment(category_code, visual_analysis)]
@@ -489,13 +537,11 @@ def _decide_classify_action(confidence: float, quality: ImageQualityResult) -> t
     @param quality 图片质量检查结果。
     @return 建议动作和人工复核标记。
     """
-    if not quality.readable:
+    if not quality.readable or confidence < MIN_REVIEW_CONFIDENCE:
         return "REJECT", True
     if confidence >= MIN_AUTO_ACCEPT_CONFIDENCE:
         return "ACCEPT", False
-    if confidence >= MIN_REVIEW_CONFIDENCE:
-        return "REVIEW", True
-    return "REJECT", True
+    return "REVIEW", True
 
 
 def _build_classified_application_materials(
@@ -875,7 +921,7 @@ def detect_objects(request: ImageTaskRequest) -> dict:
     category_code = _match_material_category(request, analysis)
     objects = _build_detected_objects(category_code, request.file_url, analysis)
     has_high_risk = any(item.risk_level == "HIGH" for item in objects)
-    suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_high_risk else "ACCEPT"
+    suggested_action = "REJECT" if not quality.readable or not objects else "REVIEW" if has_high_risk else "ACCEPT"
     result = ObjectDetectResult(
         business_id=request.business_id,
         file_url=request.file_url,
@@ -902,10 +948,10 @@ def segment_image(request: ImageTaskRequest) -> dict:
     analysis = analyze_image(request.file_url)
     quality = _check_image_quality(request.file_url, analysis)
     category_code = _match_material_category(request, analysis)
-    category_name = MATERIAL_CATEGORY_RULES[category_code]["name"]
+    category_name = MATERIAL_CATEGORY_RULES.get(category_code, {"name": UNKNOWN_MATERIAL_NAME})["name"]
     segments = _build_segments(category_code, request.file_url, analysis)
     has_review_segment = any(item.need_manual_review for item in segments)
-    suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_review_segment else "ACCEPT"
+    suggested_action = "REJECT" if not quality.readable or not segments else "REVIEW" if has_review_segment else "ACCEPT"
     result = ImageSegmentResult(
         business_id=request.business_id,
         file_url=request.file_url,

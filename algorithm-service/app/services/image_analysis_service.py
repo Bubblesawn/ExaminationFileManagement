@@ -69,7 +69,7 @@ def analyze_image(file_url: str) -> ImageAnalysis:
                 issues.append("LOW_RESOLUTION")
             if brightness < 0.18:
                 issues.append("LOW_LIGHT")
-            if brightness > 0.9:
+            if brightness > 0.96:
                 issues.append("OVER_EXPOSURE")
             if contrast < 0.12:
                 issues.append("LOW_CONTRAST")
@@ -98,6 +98,10 @@ def resolve_image_path(file_url: str) -> Path | None:
     @param file_url 图片相对地址、绝对路径或本地服务 URL。
     @return 存在的本地图片路径；无法解析时返回 None。
     """
+    windows_path = Path(file_url)
+    if len(file_url) > 2 and file_url[1] == ":" and windows_path.exists():
+        return windows_path
+
     parsed = urlparse(file_url)
     raw_path = unquote(parsed.path if parsed.scheme else file_url).replace("\\", "/")
     candidate_path = Path(raw_path)
@@ -175,6 +179,58 @@ def estimate_visual_confidence(base_confidence: float, analysis: ImageAnalysis) 
     return round(max(0.2, min(0.98, base_confidence - penalty)), 2)
 
 
+def estimate_material_document_score(analysis: ImageAnalysis) -> float:
+    """@brief 估算图片是否具备考籍材料文档形态证据。
+
+    @param analysis 图片视觉分析结果。
+    @return 0 到 1 的材料文档形态得分，越高表示越像可审核材料。
+    """
+    if not analysis.loaded or analysis.width <= 0 or analysis.height <= 0:
+        return 0.0
+    if looks_like_certificate_photo(analysis):
+        return 0.72
+
+    score = 0.0
+    ratio = analysis.width / analysis.height
+    if 0.55 <= ratio <= 1.7:
+        score += 0.12
+    elif 0.35 <= ratio <= 2.4:
+        score += 0.05
+
+    if analysis.document_bbox:
+        document_area = analysis.document_bbox.width * analysis.document_bbox.height
+        image_area = analysis.width * analysis.height
+        coverage = document_area / image_area if image_area else 0
+        if 0.25 <= coverage <= 0.98:
+            score += 0.36
+        if 0.5 <= coverage <= 0.95:
+            score += 0.08
+
+    if 0.02 <= analysis.edge_score <= 0.18:
+        score += min(0.22, analysis.edge_score * 2.2)
+    elif analysis.edge_score > 0.18:
+        score += 0.12
+
+    if 0.14 <= analysis.contrast <= 0.9:
+        score += min(0.18, analysis.contrast * 0.35)
+    if 0.2 <= analysis.brightness <= 0.88:
+        score += 0.08
+
+    penalty = 0.0
+    penalty += 0.08 * sum(issue in analysis.issues for issue in ("LOW_RESOLUTION", "LOW_LIGHT", "OVER_EXPOSURE"))
+    penalty += 0.12 * sum(issue in analysis.issues for issue in ("LOW_CONTRAST", "BLUR_RISK"))
+    return round(max(0.0, min(1.0, score - penalty)), 2)
+
+
+def has_material_document_evidence(analysis: ImageAnalysis) -> bool:
+    """@brief 判断图片是否有足够证据进入材料识别流程。
+
+    @param analysis 图片视觉分析结果。
+    @return 存在材料主体或证件照形态证据时返回 True。
+    """
+    return estimate_material_document_score(analysis) >= 0.48
+
+
 def looks_like_certificate_photo(analysis: ImageAnalysis) -> bool:
     """@brief 判断图片是否更像单独的考生证件照。
 
@@ -184,8 +240,33 @@ def looks_like_certificate_photo(analysis: ImageAnalysis) -> bool:
     if not analysis.loaded or analysis.width == 0 or analysis.height == 0:
         return False
     ratio = analysis.width / analysis.height
-    has_full_document = analysis.document_bbox is not None and analysis.document_bbox.width > analysis.width * 0.82
-    return 0.62 <= ratio <= 0.86 and not has_full_document
+    document_area_ratio = 0.0
+    if analysis.document_bbox is not None:
+        document_area_ratio = (analysis.document_bbox.width * analysis.document_bbox.height) / (analysis.width * analysis.height)
+    return 0.62 <= ratio <= 0.86 and document_area_ratio < 0.45
+
+
+def looks_like_id_card_document(analysis: ImageAnalysis) -> bool:
+    """@brief 判断图片是否具备身份证卡片的基础版式特征。
+
+    @param analysis 图片视觉分析结果。
+    @return 图片主体呈横向卡片比例且具备可审核材料证据时返回 True。
+    """
+    if not analysis.loaded or analysis.width == 0 or analysis.height == 0:
+        return False
+
+    ratio = analysis.width / analysis.height
+    document_ratio = ratio
+    document_area_ratio = 1.0
+    if analysis.document_bbox is not None:
+        document_ratio = analysis.document_bbox.width / analysis.document_bbox.height
+        document_area_ratio = (analysis.document_bbox.width * analysis.document_bbox.height) / (analysis.width * analysis.height)
+
+    return (
+        1.35 <= document_ratio <= 1.95
+        and 0.18 <= document_area_ratio <= 0.98
+        and estimate_material_document_score(analysis) >= 0.48
+    )
 
 
 def _extract_material_relative_path(raw_path: str) -> Path | None:
