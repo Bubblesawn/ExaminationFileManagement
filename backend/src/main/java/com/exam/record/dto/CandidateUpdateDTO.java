@@ -6,13 +6,13 @@ import lombok.Data;
 import java.time.LocalDate;
 
 /**
- * @brief 新增考生请求对象。
+ * @brief 修改考生请求对象。
  *
  * @details
- * 用于承载考生基础信息新增接口的请求参数，必填字段为姓名和身份证号。
+ * 用于承载考生基础信息修改接口的请求参数，更新时要求保留考生姓名和身份证号。
  */
 @Data
-public class CandidateCreateDTO {
+public class CandidateUpdateDTO {
     @NotBlank(message = "不能为空")
     private String name;
 
@@ -32,3 +32,4 @@ public class CandidateCreateDTO {
     private String address;
     private String status;
 }
+
