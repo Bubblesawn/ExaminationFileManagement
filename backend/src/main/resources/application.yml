@@ -31,3 +31,7 @@ auth:
   token:
     secret: examination-file-management-local-secret
     expire-seconds: 7200
+
+algorithm:
+  service:
+    base-url: http://localhost:9000/api

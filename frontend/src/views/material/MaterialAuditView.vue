@@ -1,2 +1,523 @@
-<template><div class="page"><h2 class="page-title">材料审核</h2><el-empty description="材料审核模块待开发" /></div></template>
+<template>
+  <div class="page material-audit-page">
+    <div class="page-heading">
+      <div>
+        <h2 class="page-title">材料审核</h2>
+        <p>联调业务申请材料分类、缺失材料提示和异常材料提醒。</p>
+      </div>
+      <el-tag :type="overallTagType" effect="light">{{ overallActionText }}</el-tag>
+    </div>
 
+    <el-row :gutter="16">
+      <el-col :xs="24" :lg="9">
+        <section class="panel">
+          <div class="panel-title">申请信息</div>
+          <el-form label-position="top">
+            <el-row :gutter="12">
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="业务编号">
+                  <el-input-number v-model="form.businessId" :min="1" controls-position="right" />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="申请人">
+                  <el-input v-model="form.applicantName" clearable />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-form-item label="申请类型">
+              <el-select v-model="form.applicationType">
+                <el-option label="免考申请" value="EXEMPTION" />
+                <el-option label="课程顶替" value="COURSE_REPLACE" />
+                <el-option label="考籍转入转出" value="TRANSFER" />
+                <el-option label="毕业申请" value="GRADUATION" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <span>申请材料</span>
+            <el-button text type="primary" @click="addMaterial">新增材料</el-button>
+          </div>
+
+          <div class="material-list">
+            <div v-for="(item, index) in materials" :key="item.localId" class="material-item">
+              <div class="material-header">
+                <span>材料 {{ index + 1 }}</span>
+                <el-button text type="danger" :disabled="materials.length === 1" @click="removeMaterial(index)">
+                  删除
+                </el-button>
+              </div>
+              <el-form label-position="top">
+                <el-form-item label="图片地址">
+                  <el-input v-model="item.fileUrl" clearable />
+                </el-form-item>
+                <el-row :gutter="10">
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="文件名称">
+                      <el-input v-model="item.fileName" clearable />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="12">
+                    <el-form-item label="登记类别">
+                      <el-select v-model="item.uploadedCategoryCode" clearable>
+                        <el-option
+                          v-for="option in materialTypeOptions"
+                          :key="option.value"
+                          :label="option.label"
+                          :value="option.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="类型提示">
+                  <el-input v-model="item.materialTypeHint" clearable placeholder="例如 身份证、成绩单、毕业证" />
+                </el-form-item>
+              </el-form>
+            </div>
+          </div>
+
+          <el-button type="primary" :loading="loading" class="submit-button" @click="submitAudit">
+            发起智能核验
+          </el-button>
+        </section>
+      </el-col>
+
+      <el-col :xs="24" :lg="15">
+        <section class="panel result-overview">
+          <div class="panel-title">智能辅助结果</div>
+          <el-empty v-if="!auditResult" description="请先发起申请材料智能核验" />
+
+          <template v-else>
+            <div class="metric-grid">
+              <div class="metric-item">
+                <span>已上传</span>
+                <strong>{{ auditResult.summary.material_count ?? 0 }}</strong>
+              </div>
+              <div class="metric-item danger">
+                <span>缺失材料</span>
+                <strong>{{ auditResult.summary.missing_count ?? 0 }}</strong>
+              </div>
+              <div class="metric-item warning">
+                <span>异常提醒</span>
+                <strong>{{ auditResult.summary.abnormal_count ?? 0 }}</strong>
+              </div>
+              <div class="metric-item">
+                <span>需复核</span>
+                <strong>{{ auditResult.summary.manual_review_count ?? 0 }}</strong>
+              </div>
+            </div>
+
+            <div class="result-section">
+              <div class="section-title">必交材料清单</div>
+              <div class="required-list">
+                <el-tag v-for="item in auditResult.required_categories" :key="item.category_code" effect="plain">
+                  {{ item.category_name }}
+                </el-tag>
+              </div>
+            </div>
+
+            <div class="result-section">
+              <div class="section-title">缺失材料提示</div>
+              <el-alert
+                v-if="auditResult.missing_materials.length === 0"
+                title="必交材料已齐全"
+                type="success"
+                show-icon
+                :closable="false"
+              />
+              <el-table v-else :data="auditResult.missing_materials" size="small" border>
+                <el-table-column prop="category_name" label="缺失材料" min-width="140" />
+                <el-table-column label="等级" width="90">
+                  <template #default="{ row }">
+                    <el-tag :type="riskTagType(row.severity)" size="small">{{ riskText(row.severity) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="message" label="提示" min-width="260" />
+              </el-table>
+            </div>
+
+            <div class="result-section">
+              <div class="section-title">异常材料提醒</div>
+              <el-alert
+                v-if="auditResult.abnormal_materials.length === 0"
+                title="暂未发现异常材料"
+                type="success"
+                show-icon
+                :closable="false"
+              />
+              <el-table v-else :data="auditResult.abnormal_materials" size="small" border>
+                <el-table-column prop="category_name" label="材料类别" min-width="130" />
+                <el-table-column prop="abnormal_type" label="异常类型" min-width="150" />
+                <el-table-column label="风险" width="90">
+                  <template #default="{ row }">
+                    <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskText(row.risk_level) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="message" label="异常说明" min-width="240" />
+                <el-table-column prop="suggestion" label="处理建议" min-width="240" />
+              </el-table>
+            </div>
+          </template>
+        </section>
+
+        <section v-if="auditResult" class="panel">
+          <div class="panel-title">材料分类结果</div>
+          <el-table :data="auditResult.classified_materials" size="small" border>
+            <el-table-column prop="file_name" label="文件名称" min-width="160" />
+            <el-table-column prop="category_name" label="识别类别" min-width="130" />
+            <el-table-column label="登记类别" min-width="130">
+              <template #default="{ row }">{{ formatUploadedCategory(row.uploaded_category_code) }}</template>
+            </el-table-column>
+            <el-table-column label="置信度" width="100">
+              <template #default="{ row }">{{ formatPercent(row.confidence) }}</template>
+            </el-table-column>
+            <el-table-column label="图片质量" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.quality.readable ? 'success' : 'danger'" size="small">
+                  {{ row.quality.readable ? '可用' : '需处理' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="建议" width="110">
+              <template #default="{ row }">
+                <el-tag :type="actionTagType(row.suggested_action)" size="small">
+                  {{ actionText(row.suggested_action) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="result-actions">
+            <el-button @click="copySummary">复制联调摘要</el-button>
+            <el-button type="primary" @click="confirmAudit">确认核验结果</el-button>
+          </div>
+        </section>
+      </el-col>
+    </el-row>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  auditApplicationMaterials,
+  type ApplicationMaterialAuditData,
+  type SuggestedAction
+} from '../../api/ai'
+
+interface EditableMaterial {
+  localId: number
+  materialId?: number
+  fileUrl: string
+  fileName: string
+  materialTypeHint: string
+  uploadedCategoryCode: string
+}
+
+type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+
+const materialTypeOptions = [
+  { label: '身份证材料', value: 'ID_CARD' },
+  { label: '准考证材料', value: 'ADMISSION_TICKET' },
+  { label: '学历证书材料', value: 'DIPLOMA' },
+  { label: '成绩单材料', value: 'TRANSCRIPT' },
+  { label: '免考证明材料', value: 'EXEMPTION_CERTIFICATE' },
+  { label: '考生照片', value: 'PHOTO' }
+]
+
+const actionTextMap: Record<SuggestedAction, string> = {
+  ACCEPT: '建议通过',
+  REVIEW: '建议复核',
+  REJECT: '建议退回'
+}
+
+const form = reactive({
+  businessId: 2026052701,
+  applicationType: 'EXEMPTION',
+  applicantName: '张三'
+})
+
+const materials = ref<EditableMaterial[]>([
+  {
+    localId: 1,
+    materialId: 101,
+    fileUrl: 'https://example.com/mock/idcard-sample.jpg',
+    fileName: 'idcard-sample.jpg',
+    materialTypeHint: '身份证',
+    uploadedCategoryCode: 'ID_CARD'
+  },
+  {
+    localId: 2,
+    materialId: 102,
+    fileUrl: 'https://example.com/mock/transcript-sample.jpg',
+    fileName: 'transcript-sample.jpg',
+    materialTypeHint: '成绩单',
+    uploadedCategoryCode: 'TRANSCRIPT'
+  }
+])
+const loading = ref(false)
+const auditResult = ref<ApplicationMaterialAuditData | null>(null)
+
+const overallActionText = computed(() => actionText(auditResult.value?.suggested_action ?? 'REVIEW'))
+const overallTagType = computed(() => actionTagType(auditResult.value?.suggested_action ?? 'REVIEW'))
+
+/**
+ * @brief 新增一条可编辑申请材料。
+ */
+function addMaterial() {
+  materials.value.push({
+    localId: Date.now(),
+    fileUrl: '',
+    fileName: '',
+    materialTypeHint: '',
+    uploadedCategoryCode: ''
+  })
+}
+
+/**
+ * @brief 移除一条申请材料。
+ *
+ * @param index 材料下标。
+ */
+function removeMaterial(index: number) {
+  materials.value.splice(index, 1)
+}
+
+/**
+ * @brief 发起申请材料智能核验联调请求。
+ */
+async function submitAudit() {
+  const invalidItem = materials.value.find((item) => !item.fileUrl.trim())
+  if (invalidItem) {
+    ElMessage.warning('请补充所有材料的图片地址')
+    return
+  }
+
+  loading.value = true
+  try {
+    const response = await auditApplicationMaterials({
+      businessId: form.businessId,
+      applicationType: form.applicationType,
+      applicantName: form.applicantName,
+      materials: materials.value.map((item) => ({
+        materialId: item.materialId,
+        fileUrl: item.fileUrl,
+        fileName: item.fileName,
+        materialTypeHint: item.materialTypeHint,
+        uploadedCategoryCode: item.uploadedCategoryCode || undefined
+      }))
+    })
+
+    if (response.code !== 200 || response.data.code !== 200) {
+      ElMessage.error(response.data?.message || response.message || '申请材料智能核验失败')
+      return
+    }
+
+    auditResult.value = response.data.data
+    ElMessage.success('申请材料智能核验完成')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '智能辅助服务暂不可用')
+  } finally {
+    loading.value = false
+  }
+}
+
+/**
+ * @brief 记录人工确认结果，后续可对接业务审核保存接口。
+ */
+function confirmAudit() {
+  ElMessage.success('核验结果已确认，可继续流转业务审核')
+}
+
+async function copySummary() {
+  if (!auditResult.value) return
+  const summary = `申请类型：${auditResult.value.application_type}；已上传：${auditResult.value.summary.material_count ?? 0}；缺失：${auditResult.value.summary.missing_count ?? 0}；异常：${auditResult.value.summary.abnormal_count ?? 0}；建议：${actionText(auditResult.value.suggested_action)}`
+  try {
+    await navigator.clipboard.writeText(summary)
+    ElMessage.success('联调摘要已复制')
+  } catch {
+    ElMessage.info(summary)
+  }
+}
+
+function actionText(action: SuggestedAction) {
+  return actionTextMap[action]
+}
+
+function actionTagType(action: SuggestedAction) {
+  if (action === 'ACCEPT') return 'success'
+  if (action === 'REJECT') return 'danger'
+  return 'warning'
+}
+
+function riskText(level: RiskLevel) {
+  const map: Record<RiskLevel, string> = {
+    LOW: '低',
+    MEDIUM: '中',
+    HIGH: '高'
+  }
+  return map[level]
+}
+
+function riskTagType(level: RiskLevel) {
+  if (level === 'HIGH') return 'danger'
+  if (level === 'MEDIUM') return 'warning'
+  return 'info'
+}
+
+function formatPercent(value?: number) {
+  return `${Number(((value ?? 0) * 100).toFixed(1))}%`
+}
+
+function formatUploadedCategory(code?: string) {
+  return materialTypeOptions.find((item) => item.value === code)?.label ?? code ?? '-'
+}
+</script>
+
+<style scoped>
+.material-audit-page {
+  display: grid;
+  gap: 16px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-heading p {
+  margin: 6px 0 0;
+  color: #667085;
+}
+
+.panel {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.panel + .panel {
+  margin-top: 16px;
+}
+
+.panel-title,
+.material-header,
+.result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-title {
+  margin-bottom: 14px;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.material-list {
+  display: grid;
+  gap: 12px;
+}
+
+.material-item {
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.material-header {
+  margin-bottom: 8px;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.submit-button,
+.panel :deep(.el-input-number),
+.panel :deep(.el-select) {
+  width: 100%;
+}
+
+.submit-button {
+  margin-top: 14px;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-item {
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.metric-item span {
+  display: block;
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric-item strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 26px;
+}
+
+.metric-item.warning strong {
+  color: #b45309;
+}
+
+.metric-item.danger strong {
+  color: #b42318;
+}
+
+.result-section {
+  margin-top: 18px;
+}
+
+.section-title {
+  margin-bottom: 8px;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.required-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.result-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .page-heading,
+  .result-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

@@ -1,51 +1,924 @@
-from app.models.schemas import ChatRequest, ImageTaskRequest, SpeechRequest
+import hashlib
+
+from app.models.schemas import (
+    AlgorithmResponse,
+    AbnormalMaterialReminder,
+    ApplicationMaterialAuditRequest,
+    ApplicationMaterialAuditResult,
+    ChatAnswerResult,
+    ChatReference,
+    ChatRequest,
+    ClassifiedApplicationMaterial,
+    ImageClassifyResult,
+    ImageQualityResult,
+    ImageSegmentResult,
+    ImageTaskRequest,
+    MissingMaterialReminder,
+    MaterialSegment,
+    MaterialCategoryCandidate,
+    DetectedObject,
+    ObjectBoundingBox,
+    ObjectDetectResult,
+    SegmentationPoint,
+    SpeechRequest,
+    SpeechRecognitionResult,
+    SpeechRecognitionSegment,
+    SpeechSynthesisResult,
+)
+
+SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
+MIN_AUTO_ACCEPT_CONFIDENCE = 0.85
+MIN_REVIEW_CONFIDENCE = 0.6
+MATERIAL_CATEGORY_RULES = {
+    "ID_CARD": {
+        "name": "身份证材料",
+        "keywords": ["idcard", "id-card", "identity", "shenfenzheng", "身份证", "证件"],
+    },
+    "ADMISSION_TICKET": {
+        "name": "准考证材料",
+        "keywords": ["admission", "ticket", "zkz", "准考证"],
+    },
+    "DIPLOMA": {
+        "name": "学历证书材料",
+        "keywords": ["diploma", "degree", "graduation", "certificate", "毕业证", "学历", "学位"],
+    },
+    "TRANSCRIPT": {
+        "name": "成绩单材料",
+        "keywords": ["transcript", "score", "grade", "成绩单", "成绩"],
+    },
+    "EXEMPTION_CERTIFICATE": {
+        "name": "免考证明材料",
+        "keywords": ["exemption", "免考", "证明"],
+    },
+    "PHOTO": {
+        "name": "考生照片",
+        "keywords": ["photo", "avatar", "portrait", "照片", "头像"],
+    },
+}
+
+APPLICATION_REQUIRED_MATERIALS = {
+    "EXEMPTION": [
+        ("ID_CARD", "身份证材料"),
+        ("TRANSCRIPT", "成绩单材料"),
+        ("EXEMPTION_CERTIFICATE", "免考证明材料"),
+    ],
+    "COURSE_REPLACE": [
+        ("ID_CARD", "身份证材料"),
+        ("TRANSCRIPT", "成绩单材料"),
+        ("DIPLOMA", "学历证书材料"),
+    ],
+    "TRANSFER": [
+        ("ID_CARD", "身份证材料"),
+        ("ADMISSION_TICKET", "准考证材料"),
+        ("TRANSCRIPT", "成绩单材料"),
+    ],
+    "GRADUATION": [
+        ("ID_CARD", "身份证材料"),
+        ("DIPLOMA", "学历证书材料"),
+        ("TRANSCRIPT", "成绩单材料"),
+        ("PHOTO", "考生照片"),
+    ],
+}
+
+OBJECT_DETECT_RULES = {
+    "ID_CARD": [
+        ("PHOTO_AREA", "照片区域", 0.95, (48, 58, 108, 138), "LOW", "用于核验考生照片"),
+        ("NAME_AREA", "姓名区域", 0.93, (182, 70, 178, 34), "LOW", "用于核验考生姓名"),
+        ("ID_NUMBER_AREA", "身份证号区域", 0.94, (180, 246, 330, 36), "LOW", "用于核验证件号码"),
+        ("OCCLUSION_RISK", "疑似遮挡区域", 0.66, (406, 126, 62, 46), "MEDIUM", "建议人工确认是否遮挡关键信息"),
+    ],
+    "ADMISSION_TICKET": [
+        ("ADMISSION_NO_AREA", "准考证号区域", 0.92, (120, 74, 260, 34), "LOW", "用于核验准考证号"),
+        ("NAME_AREA", "姓名区域", 0.9, (120, 122, 160, 32), "LOW", "用于核验考生姓名"),
+        ("EXAM_INFO_AREA", "考试信息区域", 0.88, (88, 178, 440, 156), "LOW", "用于核验考试课程和考点信息"),
+    ],
+    "DIPLOMA": [
+        ("NAME_AREA", "姓名区域", 0.89, (130, 128, 168, 32), "LOW", "用于核验证书姓名"),
+        ("CERTIFICATE_NO_AREA", "证书编号区域", 0.86, (118, 430, 286, 34), "LOW", "用于核验证书编号"),
+        ("SEAL_AREA", "印章区域", 0.82, (410, 360, 118, 118), "MEDIUM", "印章区域需要人工确认"),
+    ],
+    "TRANSCRIPT": [
+        ("NAME_AREA", "姓名区域", 0.88, (76, 82, 150, 30), "LOW", "用于核验成绩单姓名"),
+        ("SCORE_TABLE_AREA", "成绩表格区域", 0.91, (58, 152, 500, 300), "LOW", "用于提取课程成绩"),
+        ("SEAL_AREA", "印章区域", 0.78, (420, 480, 112, 112), "MEDIUM", "印章清晰度建议人工确认"),
+    ],
+    "EXEMPTION_CERTIFICATE": [
+        ("NAME_AREA", "姓名区域", 0.88, (104, 96, 160, 32), "LOW", "用于核验申请人姓名"),
+        ("CERTIFICATE_NO_AREA", "证明编号区域", 0.83, (110, 152, 260, 34), "LOW", "用于核验证明编号"),
+        ("SEAL_AREA", "印章区域", 0.8, (390, 360, 126, 126), "MEDIUM", "印章区域需要人工确认"),
+    ],
+    "PHOTO": [
+        ("FACE_AREA", "人像区域", 0.96, (156, 54, 220, 280), "LOW", "用于核验考生照片主体"),
+        ("BACKGROUND_AREA", "背景区域", 0.82, (42, 36, 448, 328), "LOW", "用于检查照片背景"),
+    ],
+}
+
+SEGMENT_TYPE_MAPPING = {
+    "PHOTO_AREA": "PHOTO",
+    "FACE_AREA": "PHOTO",
+    "BACKGROUND_AREA": "BACKGROUND",
+    "NAME_AREA": "TEXT",
+    "ID_NUMBER_AREA": "TEXT",
+    "ADMISSION_NO_AREA": "TEXT",
+    "EXAM_INFO_AREA": "TEXT",
+    "CERTIFICATE_NO_AREA": "TEXT",
+    "SCORE_TABLE_AREA": "TABLE",
+    "SEAL_AREA": "SEAL",
+    "OCCLUSION_RISK": "RISK",
+}
+
+SEGMENT_NAME_MAPPING = {
+    "PHOTO_AREA": "照片提取区域",
+    "FACE_AREA": "人像主体区域",
+    "BACKGROUND_AREA": "照片背景区域",
+    "NAME_AREA": "姓名文字区域",
+    "ID_NUMBER_AREA": "身份证号文字区域",
+    "ADMISSION_NO_AREA": "准考证号文字区域",
+    "EXAM_INFO_AREA": "考试信息文字区域",
+    "CERTIFICATE_NO_AREA": "证书编号文字区域",
+    "SCORE_TABLE_AREA": "成绩表格区域",
+    "SEAL_AREA": "印章提取区域",
+    "OCCLUSION_RISK": "疑似遮挡分割区域",
+}
+
+DEFAULT_IMAGE_WIDTH = 600
+DEFAULT_IMAGE_HEIGHT = 800
+
+FAQ_RULES = [
+    {
+        "intent_code": "ARCHIVE_QUERY",
+        "intent_name": "考籍档案查询",
+        "keywords": ["考籍", "档案", "查询", "信息"],
+        "answer": "考籍档案可以在考生信息管理或考籍档案页面查询。建议先输入准考证号、身份证号或姓名进行检索，再进入详情查看基本信息、材料和状态记录。",
+        "references": [
+            ("考籍档案管理", "支持按考生基础信息查询档案详情、材料和状态变更记录。", "系统业务规则"),
+        ],
+        "suggestions": ["查询考生基础信息", "查看档案材料状态", "核对档案变更记录"],
+    },
+    {
+        "intent_code": "MATERIAL_UPLOAD",
+        "intent_name": "材料上传与审核",
+        "keywords": ["材料", "上传", "附件", "审核", "图片"],
+        "answer": "材料上传后系统会进行格式校验、图片质量检查和智能识别辅助。若提示不清晰、遮挡或格式不支持，需要重新上传或转人工复核。",
+        "references": [
+            ("材料预处理", "支持图片格式校验、清晰度检测、分类、检测和分割辅助。", "智能辅助规则"),
+        ],
+        "suggestions": ["重新上传清晰图片", "查看智能识别结果", "提交人工确认"],
+    },
+    {
+        "intent_code": "EXEMPTION_APPLY",
+        "intent_name": "免考申请办理",
+        "keywords": ["免考", "申请", "证明", "课程免修"],
+        "answer": "办理免考申请时，需要选择免考课程并上传对应证明材料。提交后进入审核流程，审核通过后会同步更新相关业务状态。",
+        "references": [
+            ("免考业务流程", "支持免考申请提交、审核、驳回、通过和流程记录查询。", "流程办理规则"),
+        ],
+        "suggestions": ["准备免考证明材料", "查看申请审核进度", "补充缺失材料"],
+    },
+    {
+        "intent_code": "COURSE_REPLACE",
+        "intent_name": "课程顶替办理",
+        "keywords": ["顶替", "课程", "替代", "课程替换"],
+        "answer": "课程顶替需要根据已维护的顶替规则提交申请。系统会关联课程信息和证明材料，审核通过后形成流程记录。",
+        "references": [
+            ("课程顶替流程", "支持课程顶替规则维护、申请提交和审核处理。", "流程办理规则"),
+        ],
+        "suggestions": ["确认课程顶替规则", "上传成绩或证明材料", "查看审核记录"],
+    },
+    {
+        "intent_code": "TRANSFER_PROCESS",
+        "intent_name": "考籍转入转出",
+        "keywords": ["转入", "转出", "转考", "外省", "省内"],
+        "answer": "考籍转入转出需要提交转考申请并补充身份、成绩或转出证明等材料。审核通过后，档案状态会按流程联动更新。",
+        "references": [
+            ("考籍转入转出", "支持转入转出申请、审核和流程记录。", "流程办理规则"),
+        ],
+        "suggestions": ["核对转考材料", "提交转入转出申请", "关注档案状态变化"],
+    },
+    {
+        "intent_code": "GRADUATION_APPLY",
+        "intent_name": "毕业申请办理",
+        "keywords": ["毕业", "毕业申请", "资格", "审核"],
+        "answer": "毕业申请需要完成资格校验，确认课程、成绩、材料和档案状态满足要求后再提交审核。审核结果可在毕业管理页面查看。",
+        "references": [
+            ("毕业申请流程", "支持毕业申请、资格校验、审核和结果查询。", "流程办理规则"),
+        ],
+        "suggestions": ["发起毕业资格校验", "补齐缺失材料", "查看毕业审核结果"],
+    },
+]
+
+ASR_TEXT_RULES = [
+    (["miankao", "exemption", "免考"], "我要办理免考申请，请帮我查询需要上传哪些证明材料。"),
+    (["biye", "graduation", "毕业"], "查询毕业申请资格校验结果。"),
+    (["zhuanru", "zhuanchu", "transfer", "转入", "转出"], "我要查询考籍转入转出的审核进度。"),
+    (["cailiao", "material", "上传", "材料"], "帮我查看材料上传后是否通过智能审核。"),
+    (["kaoji", "archive", "档案", "考籍"], "查询考生考籍档案。"),
+]
+
+SCENE_INTENT_MAPPING = {
+    "archive": "ARCHIVE_QUERY",
+    "material": "MATERIAL_UPLOAD",
+    "audit": "MATERIAL_UPLOAD",
+    "exemption": "EXEMPTION_APPLY",
+    "course": "COURSE_REPLACE",
+    "replace": "COURSE_REPLACE",
+    "transfer": "TRANSFER_PROCESS",
+    "graduation": "GRADUATION_APPLY",
+}
+
+
+def _success(data: dict) -> dict:
+    """@brief 构造算法服务成功响应。
+
+    @param data 响应业务数据。
+    @return 符合算法服务统一响应格式的字典。
+    """
+    return AlgorithmResponse(code=200, message="操作成功", data=data).model_dump()
+
+
+def _fail(code: int, message: str) -> dict:
+    """@brief 构造算法服务失败响应。
+
+    @param code 业务错误码。
+    @param message 错误提示。
+    @return 符合算法服务统一响应格式的字典。
+    """
+    return AlgorithmResponse(code=code, message=message, data=None).model_dump()
+
+
+def _normalize_text(*values: str | None) -> str:
+    """@brief 合并分类所需文本并统一大小写。
+
+    @param values 分类相关文本片段。
+    @return 标准化后的分类文本。
+    """
+    return " ".join(value for value in values if value).lower()
+
+
+def _contains_keyword(text: str, keywords: list[str]) -> bool:
+    """@brief 判断文本是否包含任一关键词。
+
+    @param text 已标准化的待匹配文本。
+    @param keywords 关键词列表。
+    @return 如果命中任一关键词则返回 True。
+    """
+    return any(keyword.lower() in text for keyword in keywords)
+
+
+def _check_image_quality(file_url: str) -> ImageQualityResult:
+    """@brief 根据文件地址做轻量级质量预检。
+
+    @param file_url 图片文件地址。
+    @return 图片质量检查结果。
+    """
+    lower_url = file_url.lower()
+    issues = []
+    if not lower_url.endswith(SUPPORTED_IMAGE_SUFFIXES):
+        issues.append("UNSUPPORTED_IMAGE_FORMAT")
+    if any(keyword in lower_url for keyword in ["blur", "low", "unclear"]):
+        issues.append("LOW_DEFINITION")
+    if any(keyword in lower_url for keyword in ["blocked", "cover", "occlusion"]):
+        issues.append("OCCLUSION")
+    return ImageQualityResult(readable=not issues, issues=issues)
+
+
+def _score_category(rule: dict, text: str) -> float:
+    """@brief 根据材料规则计算分类置信度。
+
+    @param rule 材料分类规则。
+    @param text 标准化后的分类文本。
+    @return 分类置信度。
+    """
+    matched_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in text)
+    if matched_count == 0:
+        return 0.15
+    return min(0.96, 0.62 + matched_count * 0.14)
+
+
+def _build_material_candidates(request: ImageTaskRequest) -> list[MaterialCategoryCandidate]:
+    """@brief 生成材料类别候选结果。
+
+    @param request 图片算法任务请求。
+    @return 按置信度倒序排列的材料类别候选项。
+    """
+    text = _normalize_text(request.file_url, request.file_name, request.material_type_hint, request.scene)
+    candidates = [
+        MaterialCategoryCandidate(
+            category_code=category_code,
+            category_name=rule["name"],
+            confidence=_score_category(rule, text),
+        )
+        for category_code, rule in MATERIAL_CATEGORY_RULES.items()
+    ]
+    return sorted(candidates, key=lambda item: item.confidence, reverse=True)[:3]
+
+
+def _match_material_category(request: ImageTaskRequest) -> str:
+    """@brief 根据请求信息匹配材料类别。
+
+    @param request 图片算法任务请求。
+    @return 最匹配的材料类别编码。
+    """
+    return _build_material_candidates(request)[0].category_code
+
+
+def _build_detected_objects(category_code: str, file_url: str) -> list[DetectedObject]:
+    """@brief 根据材料类别生成关键区域检测结果。
+
+    @param category_code 材料类别编码。
+    @param file_url 图片文件地址。
+    @return 关键区域检测对象列表。
+    """
+    detected_objects = [
+        DetectedObject(
+            object_code=object_code,
+            object_name=object_name,
+            confidence=confidence,
+            bbox=ObjectBoundingBox(x=x, y=y, width=width, height=height),
+            risk_level=risk_level,
+            remark=remark,
+        )
+        for object_code, object_name, confidence, (x, y, width, height), risk_level, remark
+        in OBJECT_DETECT_RULES.get(category_code, OBJECT_DETECT_RULES["ID_CARD"])
+    ]
+    if any(keyword in file_url.lower() for keyword in ["blocked", "cover", "occlusion"]):
+        detected_objects.append(
+            DetectedObject(
+                object_code="OCCLUSION_RISK",
+                object_name="疑似遮挡区域",
+                confidence=0.74,
+                bbox=ObjectBoundingBox(x=310, y=140, width=96, height=72),
+                risk_level="HIGH",
+                remark="检测到疑似遮挡，建议退回重传或人工复核",
+            )
+        )
+    return detected_objects
+
+
+def _build_document_segment(category_code: str) -> MaterialSegment:
+    """@brief 生成整张材料主体分割区域。
+
+    @param category_code 材料类别编码。
+    @return 材料主体分割区域。
+    """
+    margin_x = 24
+    margin_y = 28
+    width = DEFAULT_IMAGE_WIDTH - margin_x * 2
+    height = DEFAULT_IMAGE_HEIGHT - margin_y * 2
+    bbox = ObjectBoundingBox(x=margin_x, y=margin_y, width=width, height=height)
+    return MaterialSegment(
+        segment_code=f"{category_code}_DOCUMENT",
+        segment_name="材料主体区域",
+        segment_type="DOCUMENT",
+        confidence=0.9,
+        bbox=bbox,
+        polygon=_rectangle_to_polygon(bbox),
+        mask_url=f"/mock/masks/{category_code.lower()}-document.png",
+        area_ratio=round((width * height) / (DEFAULT_IMAGE_WIDTH * DEFAULT_IMAGE_HEIGHT), 4),
+        extraction_priority=1,
+        need_manual_review=False,
+        remark="用于裁剪材料主体并去除图片边缘背景",
+    )
+
+
+def _rectangle_to_polygon(bbox: ObjectBoundingBox) -> list[SegmentationPoint]:
+    """@brief 将外接矩形转换为四点轮廓。
+
+    @param bbox 目标区域外接矩形。
+    @return 按左上、右上、右下、左下顺序排列的轮廓点。
+    """
+    right = bbox.x + bbox.width
+    bottom = bbox.y + bbox.height
+    return [
+        SegmentationPoint(x=bbox.x, y=bbox.y),
+        SegmentationPoint(x=right, y=bbox.y),
+        SegmentationPoint(x=right, y=bottom),
+        SegmentationPoint(x=bbox.x, y=bottom),
+    ]
+
+
+def _build_segments(category_code: str, file_url: str) -> list[MaterialSegment]:
+    """@brief 根据目标检测结果生成图像分割区域。
+
+    @param category_code 材料类别编码。
+    @param file_url 图片文件地址。
+    @return 可用于材料区域提取的分割结果列表。
+    """
+    segments = [_build_document_segment(category_code)]
+    for index, detected_object in enumerate(_build_detected_objects(category_code, file_url), start=2):
+        segment_type = SEGMENT_TYPE_MAPPING.get(detected_object.object_code, "TEXT")
+        segment_name = SEGMENT_NAME_MAPPING.get(detected_object.object_code, detected_object.object_name)
+        bbox = detected_object.bbox
+        area_ratio = round((bbox.width * bbox.height) / (DEFAULT_IMAGE_WIDTH * DEFAULT_IMAGE_HEIGHT), 4)
+        is_risk_segment = detected_object.risk_level in {"MEDIUM", "HIGH"} or segment_type == "RISK"
+        segments.append(
+            MaterialSegment(
+                segment_code=detected_object.object_code,
+                segment_name=segment_name,
+                segment_type=segment_type,
+                confidence=max(0.0, round(detected_object.confidence - 0.03, 2)),
+                bbox=bbox,
+                polygon=_rectangle_to_polygon(bbox),
+                mask_url=f"/mock/masks/{category_code.lower()}-{detected_object.object_code.lower()}.png",
+                area_ratio=area_ratio,
+                extraction_priority=index,
+                need_manual_review=is_risk_segment,
+                remark=detected_object.remark,
+            )
+        )
+    return segments
+
+
+def _decide_classify_action(confidence: float, quality: ImageQualityResult) -> tuple[str, bool]:
+    """@brief 根据分类置信度和图片质量给出建议动作。
+
+    @param confidence 分类置信度。
+    @param quality 图片质量检查结果。
+    @return 建议动作和人工复核标记。
+    """
+    if not quality.readable:
+        return "REJECT", True
+    if confidence >= MIN_AUTO_ACCEPT_CONFIDENCE:
+        return "ACCEPT", False
+    if confidence >= MIN_REVIEW_CONFIDENCE:
+        return "REVIEW", True
+    return "REJECT", True
+
+
+def _build_classified_application_materials(
+        request: ApplicationMaterialAuditRequest) -> list[ClassifiedApplicationMaterial]:
+    """@brief 生成申请材料分类结果列表。
+
+    @param request 申请材料智能核验请求。
+    @return 每份材料的分类、质量和处理建议。
+    """
+    classified_materials = []
+    for item in request.materials:
+        image_request = ImageTaskRequest(
+            file_url=item.file_url,
+            business_id=request.business_id,
+            scene=request.application_type,
+            file_name=item.file_name,
+            material_type_hint=item.material_type_hint or item.uploaded_category_code,
+        )
+        quality = _check_image_quality(item.file_url)
+        candidates = _build_material_candidates(image_request)
+        best_candidate = candidates[0]
+        suggested_action, need_manual_review = _decide_classify_action(best_candidate.confidence, quality)
+        if item.uploaded_category_code and item.uploaded_category_code != best_candidate.category_code:
+            suggested_action = "REVIEW"
+            need_manual_review = True
+        classified_materials.append(
+            ClassifiedApplicationMaterial(
+                material_id=item.material_id,
+                file_url=item.file_url,
+                file_name=item.file_name,
+                uploaded_category_code=item.uploaded_category_code,
+                category_code=best_candidate.category_code,
+                category_name=best_candidate.category_name,
+                confidence=best_candidate.confidence,
+                candidates=candidates,
+                quality=quality,
+                suggested_action=suggested_action,
+                need_manual_review=need_manual_review,
+            )
+        )
+    return classified_materials
+
+
+def _get_required_categories(application_type: str) -> list[MaterialCategoryCandidate]:
+    """@brief 获取申请类型要求的材料类别。
+
+    @param application_type 申请类型。
+    @return 必交材料类别列表。
+    """
+    normalized_type = application_type.upper()
+    rules = APPLICATION_REQUIRED_MATERIALS.get(normalized_type, APPLICATION_REQUIRED_MATERIALS["EXEMPTION"])
+    return [
+        MaterialCategoryCandidate(category_code=category_code, category_name=category_name, confidence=1.0)
+        for category_code, category_name in rules
+    ]
+
+
+def _build_missing_materials(
+        required_categories: list[MaterialCategoryCandidate],
+        classified_materials: list[ClassifiedApplicationMaterial]) -> list[MissingMaterialReminder]:
+    """@brief 生成缺失材料提示。
+
+    @param required_categories 必交材料类别。
+    @param classified_materials 已分类材料列表。
+    @return 缺失材料提醒列表。
+    """
+    uploaded_codes = {item.category_code for item in classified_materials if item.suggested_action != "REJECT"}
+    return [
+        MissingMaterialReminder(
+            category_code=item.category_code,
+            category_name=item.category_name,
+            severity="HIGH",
+            message=f"当前申请缺少必交材料：{item.category_name}，请补充上传后再提交审核。",
+        )
+        for item in required_categories
+        if item.category_code not in uploaded_codes
+    ]
+
+
+def _build_abnormal_materials(
+        classified_materials: list[ClassifiedApplicationMaterial]) -> list[AbnormalMaterialReminder]:
+    """@brief 生成异常材料提醒。
+
+    @param classified_materials 已分类材料列表。
+    @return 异常材料提醒列表。
+    """
+    abnormal_materials = []
+    seen_codes: set[str] = set()
+    duplicated_codes: set[str] = set()
+    for item in classified_materials:
+        if item.category_code in seen_codes:
+            duplicated_codes.add(item.category_code)
+        seen_codes.add(item.category_code)
+
+    for item in classified_materials:
+        if not item.quality.readable:
+            abnormal_materials.append(
+                AbnormalMaterialReminder(
+                    material_id=item.material_id,
+                    file_url=item.file_url,
+                    category_code=item.category_code,
+                    category_name=item.category_name,
+                    abnormal_type="QUALITY_RISK",
+                    risk_level="HIGH",
+                    message="材料图片存在格式、清晰度或遮挡问题，可能无法用于审核。",
+                    suggestion="请退回申请人重新上传清晰、无遮挡的材料图片。",
+                )
+            )
+        if item.confidence < MIN_REVIEW_CONFIDENCE:
+            abnormal_materials.append(
+                AbnormalMaterialReminder(
+                    material_id=item.material_id,
+                    file_url=item.file_url,
+                    category_code=item.category_code,
+                    category_name=item.category_name,
+                    abnormal_type="LOW_CONFIDENCE",
+                    risk_level="MEDIUM",
+                    message="材料分类置信度偏低，算法无法稳定确认材料类别。",
+                    suggestion="请人工核对材料类别，必要时要求补传。",
+                )
+            )
+        if item.uploaded_category_code and item.uploaded_category_code != item.category_code:
+            abnormal_materials.append(
+                AbnormalMaterialReminder(
+                    material_id=item.material_id,
+                    file_url=item.file_url,
+                    category_code=item.category_code,
+                    category_name=item.category_name,
+                    abnormal_type="CATEGORY_MISMATCH",
+                    risk_level="MEDIUM",
+                    message="上传登记类别与智能识别类别不一致。",
+                    suggestion="请人工确认材料归类，并修正业务系统中的材料类别。",
+                )
+            )
+        if item.category_code in duplicated_codes:
+            abnormal_materials.append(
+                AbnormalMaterialReminder(
+                    material_id=item.material_id,
+                    file_url=item.file_url,
+                    category_code=item.category_code,
+                    category_name=item.category_name,
+                    abnormal_type="DUPLICATED_CATEGORY",
+                    risk_level="LOW",
+                    message=f"检测到多份{item.category_name}，可能存在重复上传。",
+                    suggestion="请保留最清晰、最完整的一份材料，其他材料可转人工判断。",
+                )
+            )
+    return abnormal_materials
+
+
+def _decide_application_action(
+        missing_materials: list[MissingMaterialReminder],
+        abnormal_materials: list[AbnormalMaterialReminder]) -> tuple[str, bool]:
+    """@brief 根据缺失和异常情况给出申请材料整体建议。
+
+    @param missing_materials 缺失材料列表。
+    @param abnormal_materials 异常材料列表。
+    @return 整体建议动作和人工复核标记。
+    """
+    if missing_materials or any(item.risk_level == "HIGH" for item in abnormal_materials):
+        return "REJECT", True
+    if abnormal_materials:
+        return "REVIEW", True
+    return "ACCEPT", False
+
+
+def _match_faq_rule(content: str, scene: str | None) -> tuple[dict, float]:
+    """@brief 根据问题内容匹配考籍办理常见问题。
+
+    @param content 用户问题。
+    @param scene 业务场景。
+    @return 命中的问答规则和匹配置信度。
+    """
+    normalized_content = _normalize_text(content, scene)
+    normalized_scene = (scene or "").lower()
+    best_rule = FAQ_RULES[0]
+    best_score = 0.0
+    for rule in FAQ_RULES:
+        matched_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in normalized_content)
+        scene_boost = 0.0
+        for scene_keyword, intent_code in SCENE_INTENT_MAPPING.items():
+            if scene_keyword in normalized_scene and rule["intent_code"] == intent_code:
+                scene_boost = 1.5
+                break
+        current_score = matched_count + scene_boost
+        if current_score > best_score:
+            best_rule = rule
+            best_score = current_score
+    if best_score == 0:
+        return {
+            "intent_code": "GENERAL_CONSULT",
+            "intent_name": "通用考籍咨询",
+            "keywords": [],
+            "answer": "当前问题可以先按考籍档案、材料审核、免考、课程顶替、转入转出或毕业申请方向处理。建议补充办理事项、考生信息或材料类型，系统会给出更准确的办理提示。",
+            "references": [
+                ("智能辅助范围", "覆盖考籍档案、材料审核、业务申请和流程查询等常见问题。", "系统业务规则"),
+            ],
+            "suggestions": ["补充具体办理事项", "说明材料类型", "转人工确认特殊情况"],
+        }, 0.52
+    return best_rule, round(min(0.95, 0.68 + best_score * 0.09), 2)
+
+
+def _build_chat_references(rule: dict) -> list[ChatReference]:
+    """@brief 生成智能问答参考依据。
+
+    @param rule 命中的问答规则。
+    @return 问答参考依据列表。
+    """
+    return [
+        ChatReference(title=title, content=content, source=source)
+        for title, content, source in rule["references"]
+    ]
+
+
+def _mock_recognized_text(audio_url: str) -> str:
+    """@brief 根据音频地址模拟识别文本。
+
+    @param audio_url 音频文件地址。
+    @return 模拟 ASR 识别文本。
+    """
+    normalized_audio_url = audio_url.lower()
+    for keywords, text in ASR_TEXT_RULES:
+        if _contains_keyword(normalized_audio_url, keywords):
+            return text
+    return "查询考生考籍档案。"
+
+
+def _split_asr_segments(text: str) -> list[SpeechRecognitionSegment]:
+    """@brief 将模拟识别文本拆分为语音片段。
+
+    @param text 完整识别文本。
+    @return 语音识别片段列表。
+    """
+    parts = [part for part in text.replace("，", "，|").replace("。", "。|").split("|") if part]
+    segments = []
+    current_start = 0.0
+    for index, part in enumerate(parts):
+        duration = max(1.2, round(len(part) * 0.16, 1))
+        end_time = round(current_start + duration, 1)
+        segments.append(
+            SpeechRecognitionSegment(
+                start_time=current_start,
+                end_time=end_time,
+                text=part,
+                confidence=max(0.82, round(0.94 - index * 0.03, 2)),
+            )
+        )
+        current_start = end_time
+    return segments
 
 
 def classify_image(request: ImageTaskRequest) -> dict:
-    """返回模拟材料类型识别结果。"""
-    return {
-        "business_id": request.business_id,
-        "file_url": request.file_url,
-        "label": "身份证材料",
-        "confidence": 0.92,
-    }
+    """@brief 识别考籍材料类别。
+
+    @param request 图片算法任务请求。
+    @return 图像分类统一响应。
+    """
+    if not request.file_url.strip():
+        return _fail(400, "图片文件地址不能为空")
+    if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
+        return _fail(415, "文件格式不支持")
+    quality = _check_image_quality(request.file_url)
+    candidates = _build_material_candidates(request)
+    best_candidate = candidates[0]
+    suggested_action, need_manual_review = _decide_classify_action(best_candidate.confidence, quality)
+    result = ImageClassifyResult(
+        business_id=request.business_id,
+        file_url=request.file_url,
+        category_code=best_candidate.category_code,
+        category_name=best_candidate.category_name,
+        confidence=best_candidate.confidence,
+        candidates=candidates,
+        quality=quality,
+        suggested_action=suggested_action,
+        need_manual_review=need_manual_review,
+    )
+    return _success(result.model_dump())
+
+
+def audit_application_materials(request: ApplicationMaterialAuditRequest) -> dict:
+    """@brief 核验业务申请材料分类、缺失项和异常风险。
+
+    @param request 申请材料智能核验请求。
+    @return 申请材料智能核验统一响应。
+    """
+    if not request.application_type.strip():
+        return _fail(400, "申请类型不能为空")
+    if not request.materials:
+        required_categories = _get_required_categories(request.application_type)
+        missing_materials = _build_missing_materials(required_categories, [])
+        result = ApplicationMaterialAuditResult(
+            business_id=request.business_id,
+            application_type=request.application_type,
+            applicant_name=request.applicant_name,
+            required_categories=required_categories,
+            classified_materials=[],
+            missing_materials=missing_materials,
+            abnormal_materials=[],
+            summary={
+                "material_count": 0,
+                "missing_count": len(missing_materials),
+                "abnormal_count": 0,
+                "manual_review_count": 0,
+            },
+            suggested_action="REJECT",
+            need_manual_review=True,
+        )
+        return _success(result.model_dump())
+
+    for item in request.materials:
+        if not item.file_url.strip():
+            return _fail(400, "材料文件地址不能为空")
+        if not item.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
+            return _fail(415, "文件格式不支持")
+
+    required_categories = _get_required_categories(request.application_type)
+    classified_materials = _build_classified_application_materials(request)
+    missing_materials = _build_missing_materials(required_categories, classified_materials)
+    abnormal_materials = _build_abnormal_materials(classified_materials)
+    suggested_action, need_manual_review = _decide_application_action(missing_materials, abnormal_materials)
+    result = ApplicationMaterialAuditResult(
+        business_id=request.business_id,
+        application_type=request.application_type,
+        applicant_name=request.applicant_name,
+        required_categories=required_categories,
+        classified_materials=classified_materials,
+        missing_materials=missing_materials,
+        abnormal_materials=abnormal_materials,
+        summary={
+            "material_count": len(classified_materials),
+            "missing_count": len(missing_materials),
+            "abnormal_count": len(abnormal_materials),
+            "manual_review_count": sum(1 for item in classified_materials if item.need_manual_review),
+        },
+        suggested_action=suggested_action,
+        need_manual_review=need_manual_review,
+    )
+    return _success(result.model_dump())
 
 
 def detect_objects(request: ImageTaskRequest) -> dict:
-    """返回模拟异常检测结果。"""
-    return {
-        "business_id": request.business_id,
-        "file_url": request.file_url,
-        "objects": [
-            {"label": "照片区域", "confidence": 0.95, "bbox": [120, 80, 260, 220]},
-            {"label": "疑似遮挡", "confidence": 0.71, "bbox": [300, 140, 360, 190]},
-        ],
-    }
+    """@brief 定位材料图片中的关键信息区域。
+
+    @param request 图片算法任务请求。
+    @return 目标检测统一响应。
+    """
+    if not request.file_url.strip():
+        return _fail(400, "图片文件地址不能为空")
+    if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
+        return _fail(415, "文件格式不支持")
+    quality = _check_image_quality(request.file_url)
+    category_code = _match_material_category(request)
+    objects = _build_detected_objects(category_code, request.file_url)
+    has_high_risk = any(item.risk_level == "HIGH" for item in objects)
+    suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_high_risk else "ACCEPT"
+    result = ObjectDetectResult(
+        business_id=request.business_id,
+        file_url=request.file_url,
+        scene=request.scene,
+        material_type_hint=request.material_type_hint,
+        objects=objects,
+        quality=quality,
+        suggested_action=suggested_action,
+        need_manual_review=suggested_action != "ACCEPT",
+    )
+    return _success(result.model_dump())
 
 
 def segment_image(request: ImageTaskRequest) -> dict:
-    """返回模拟图像分割结果。"""
-    return {
-        "business_id": request.business_id,
-        "file_url": request.file_url,
-        "segments": [
-            {"label": "姓名区域", "mask_url": "/mock/masks/name.png"},
-            {"label": "证件号区域", "mask_url": "/mock/masks/id-card.png"},
-        ],
-    }
+    """@brief 分割材料图片中的可提取区域。
+
+    @param request 图片算法任务请求。
+    @return 图像分割统一响应。
+    """
+    if not request.file_url.strip():
+        return _fail(400, "图片文件地址不能为空")
+    if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
+        return _fail(415, "文件格式不支持")
+    quality = _check_image_quality(request.file_url)
+    category_code = _match_material_category(request)
+    category_name = MATERIAL_CATEGORY_RULES[category_code]["name"]
+    segments = _build_segments(category_code, request.file_url)
+    has_review_segment = any(item.need_manual_review for item in segments)
+    suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_review_segment else "ACCEPT"
+    result = ImageSegmentResult(
+        business_id=request.business_id,
+        file_url=request.file_url,
+        scene=request.scene,
+        material_type_hint=request.material_type_hint,
+        category_code=category_code,
+        category_name=category_name,
+        image_width=DEFAULT_IMAGE_WIDTH,
+        image_height=DEFAULT_IMAGE_HEIGHT,
+        segments=segments,
+        quality=quality,
+        suggested_action=suggested_action,
+        need_manual_review=suggested_action != "ACCEPT",
+    )
+    return _success(result.model_dump())
 
 
 def answer_question(request: ChatRequest) -> dict:
-    """返回模拟考籍业务问答结果。"""
-    return {"answer": f"已收到问题：{request.content}。后续将接入正式大模型服务。"}
+    """@brief 回答考籍办理常见问题。
+
+    @param request 智能问答请求。
+    @return 智能问答统一响应。
+    """
+    if not request.content.strip():
+        return _fail(400, "问题内容不能为空")
+    rule, confidence = _match_faq_rule(request.content, request.scene)
+    result = ChatAnswerResult(
+        business_id=request.business_id,
+        question=request.content,
+        scene=request.scene,
+        intent_code=rule["intent_code"],
+        intent_name=rule["intent_name"],
+        answer=rule["answer"],
+        confidence=confidence,
+        references=_build_chat_references(rule),
+        suggestions=rule["suggestions"],
+        need_manual_review=confidence < MIN_REVIEW_CONFIDENCE,
+    )
+    return _success(result.model_dump())
 
 
 def recognize_speech(request: SpeechRequest) -> dict:
-    """返回模拟语音识别结果。"""
-    return {"audio_url": request.audio_url, "text": "查询考生考籍档案"}
+    """@brief 将语音输入转换为文本。
+
+    @param request 语音识别请求。
+    @return 语音识别统一响应。
+    """
+    if not request.audio_url.strip():
+        return _fail(400, "音频文件地址不能为空")
+    if not request.audio_url.lower().endswith(SUPPORTED_AUDIO_SUFFIXES):
+        return _fail(415, "音频格式不支持")
+    text = _mock_recognized_text(request.audio_url)
+    segments = _split_asr_segments(text)
+    confidence = min(item.confidence for item in segments) if segments else 0
+    result = SpeechRecognitionResult(
+        business_id=request.business_id,
+        audio_url=request.audio_url,
+        scene=request.scene,
+        language=request.language_hint or "zh-CN",
+        text=text,
+        duration_seconds=segments[-1].end_time if segments else 1.2,
+        confidence=confidence,
+        segments=segments,
+        suggested_action="ACCEPT" if confidence >= MIN_AUTO_ACCEPT_CONFIDENCE else "REVIEW",
+        need_manual_review=confidence < MIN_AUTO_ACCEPT_CONFIDENCE,
+    )
+    return _success(result.model_dump())
 
 
 def synthesize_speech(request: ChatRequest) -> dict:
-    """返回模拟语音合成结果。"""
-    return {"text": request.content, "audio_url": "/mock/audio/tts-result.mp3"}
+    """@brief 将办理结果和提示信息合成为语音。
+
+    @param request 语音播报请求。
+    @return 语音合成统一响应。
+    """
+    if not request.content.strip():
+        return _fail(400, "播报文本不能为空")
+    normalized_scene = (request.scene or "general").lower().replace("_", "-")
+    text_hash = hashlib.md5(request.content.encode("utf-8")).hexdigest()[:10]
+    duration_seconds = round(max(1.2, len(request.content) * 0.18), 1)
+    result = SpeechSynthesisResult(
+        business_id=request.business_id,
+        text=request.content,
+        scene=request.scene,
+        voice_name="standard-female-cn",
+        language="zh-CN",
+        audio_url=f"/mock/audio/tts-{normalized_scene}-{text_hash}.mp3",
+        audio_format="mp3",
+        duration_seconds=duration_seconds,
+        sample_rate=24000,
+        suggested_action="ACCEPT",
+    )
+    return _success(result.model_dump())
 

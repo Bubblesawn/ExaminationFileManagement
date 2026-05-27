@@ -1,7 +1,8 @@
 from fastapi import APIRouter
 
-from app.models.schemas import ChatRequest, ImageTaskRequest, SpeechRequest
+from app.models.schemas import AlgorithmResponse, ApplicationMaterialAuditRequest, ChatRequest, ImageTaskRequest, SpeechRequest
 from app.services.mock_algorithm_service import (
+    audit_application_materials,
     classify_image,
     detect_objects,
     segment_image,
@@ -13,38 +14,72 @@ from app.services.mock_algorithm_service import (
 router = APIRouter()
 
 
-@router.post("/image-classify")
+@router.post("/image-classify", response_model=AlgorithmResponse)
 def image_classify(request: ImageTaskRequest) -> dict:
-    """模拟图像分类接口。"""
+    """@brief 识别考籍材料类别。
+
+    @param request 图片算法任务请求。
+    @return 图像分类统一响应。
+    """
     return classify_image(request)
 
 
-@router.post("/object-detect")
+@router.post("/application-material-audit", response_model=AlgorithmResponse)
+def application_material_audit(request: ApplicationMaterialAuditRequest) -> dict:
+    """@brief 核验申请材料分类、缺失项和异常提醒。
+
+    @param request 申请材料智能核验请求。
+    @return 申请材料核验统一响应。
+    """
+    return audit_application_materials(request)
+
+
+@router.post("/object-detect", response_model=AlgorithmResponse)
 def object_detect(request: ImageTaskRequest) -> dict:
-    """模拟目标检测接口。"""
+    """@brief 定位材料中的关键信息区域。
+
+    @param request 图片算法任务请求。
+    @return 目标检测统一响应。
+    """
     return detect_objects(request)
 
 
-@router.post("/image-segment")
+@router.post("/image-segment", response_model=AlgorithmResponse)
 def image_segment(request: ImageTaskRequest) -> dict:
-    """模拟图像分割接口。"""
+    """@brief 分割材料图片中的可提取区域。
+
+    @param request 图片算法任务请求。
+    @return 图像分割统一响应。
+    """
     return segment_image(request)
 
 
-@router.post("/chat")
+@router.post("/chat", response_model=AlgorithmResponse)
 def chat(request: ChatRequest) -> dict:
-    """模拟考籍业务智能问答接口。"""
+    """@brief 回答考籍办理常见问题。
+
+    @param request 智能问答请求。
+    @return 智能问答统一响应。
+    """
     return answer_question(request)
 
 
-@router.post("/asr")
+@router.post("/asr", response_model=AlgorithmResponse)
 def asr(request: SpeechRequest) -> dict:
-    """模拟 ASR 语音识别接口。"""
+    """@brief 将语音输入转换为文本。
+
+    @param request 语音识别请求。
+    @return 语音识别统一响应。
+    """
     return recognize_speech(request)
 
 
-@router.post("/tts")
+@router.post("/tts", response_model=AlgorithmResponse)
 def tts(request: ChatRequest) -> dict:
-    """模拟 TTS 语音合成接口。"""
+    """@brief 将办理结果和提示信息合成为语音。
+
+    @param request 语音播报请求。
+    @return 语音合成统一响应。
+    """
     return synthesize_speech(request)
 

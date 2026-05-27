@@ -42,11 +42,14 @@ npm run dev
 ### 算法服务
 
 ```bash
-cd algorithm-service
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 9000
+cd D:\idea\IDEAProject\ExaminationFileManagement\algorithm-service
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install -r requirements.txt
+
+python -m uvicorn app.main:app --host 127.0.0.1 --port 9000 --reload
 ```
 
 默认地址：`http://localhost:9000`

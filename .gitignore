@@ -1,11 +1,16 @@
 # Java
 target/
 *.class
+.m2/
 
 # Node
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+/package-lock.json
 
 # Python
 __pycache__/
@@ -15,6 +20,7 @@ __pycache__/
 # IDE
 .idea/
 .vscode/
+.claude/
 *.iml
 
 # OS
