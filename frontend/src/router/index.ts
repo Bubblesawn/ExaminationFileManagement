@@ -19,7 +19,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'graduations', component: () => import('../views/graduation/GraduationView.vue'), meta: { title: '毕业管理' } },
       { path: 'ai', component: () => import('../views/ai/AiAssistantView.vue'), meta: { title: '智能辅助' } },
       { path: 'system', component: () => import('../views/system/SystemView.vue'), meta: { title: '用户管理' } },
-      { path: 'system/menus', component: () => import('../views/system/MenuManageView.vue'), meta: { title: '菜单管理' } }
+      { path: 'system/menus', component: () => import('../views/system/MenuManageView.vue'), meta: { title: '菜单管理' } },
+      { path: 'system/logs', component: () => import('../views/system/LogManageView.vue'), meta: { title: '日志管理' } }
     ]
   }
 ]

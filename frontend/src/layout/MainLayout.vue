@@ -19,6 +19,7 @@
           </template>
           <el-menu-item index="/system"><span>用户管理</span></el-menu-item>
           <el-menu-item index="/system/menus"><span>菜单管理</span></el-menu-item>
+          <el-menu-item index="/system/logs"><span>日志管理</span></el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
