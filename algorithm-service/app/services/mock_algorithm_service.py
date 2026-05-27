@@ -189,7 +189,7 @@ FAQ_RULES = [
     {
         "intent_code": "TRANSFER_PROCESS",
         "intent_name": "考籍转入转出",
-        "keywords": ["转入", "转出", "转考", "外省", "省内"],
+        "keywords": ["转入", "转出", "转考", "转入办理", "转出办理", "转考进度", "外省", "省内"],
         "answer": "考籍转入转出需要提交转考申请并补充身份、成绩或转出证明等材料。审核通过后，档案状态会按流程联动更新。",
         "references": [
             ("考籍转入转出", "支持转入转出申请、审核和流程记录。", "流程办理规则"),
@@ -217,14 +217,12 @@ ASR_TEXT_RULES = [
 ]
 
 SCENE_INTENT_MAPPING = {
-    "archive": "ARCHIVE_QUERY",
-    "material": "MATERIAL_UPLOAD",
-    "audit": "MATERIAL_UPLOAD",
-    "exemption": "EXEMPTION_APPLY",
-    "course": "COURSE_REPLACE",
-    "replace": "COURSE_REPLACE",
-    "transfer": "TRANSFER_PROCESS",
-    "graduation": "GRADUATION_APPLY",
+    "ARCHIVE": "ARCHIVE_QUERY",
+    "MATERIAL_AUDIT": "MATERIAL_UPLOAD",
+    "EXEMPTION": "EXEMPTION_APPLY",
+    "COURSE_REPLACE": "COURSE_REPLACE",
+    "TRANSFER": "TRANSFER_PROCESS",
+    "GRADUATION": "GRADUATION_APPLY",
 }
 
 
@@ -617,21 +615,22 @@ def _match_faq_rule(content: str, scene: str | None) -> tuple[dict, float]:
     @param scene 业务场景。
     @return 命中的问答规则和匹配置信度。
     """
-    normalized_content = _normalize_text(content, scene)
-    normalized_scene = (scene or "").lower()
+    normalized_content = _normalize_text(content)
+    normalized_scene = (scene or "").upper()
     best_rule = FAQ_RULES[0]
     best_score = 0.0
     for rule in FAQ_RULES:
         matched_count = sum(1 for keyword in rule["keywords"] if keyword.lower() in normalized_content)
-        scene_boost = 0.0
-        for scene_keyword, intent_code in SCENE_INTENT_MAPPING.items():
-            if scene_keyword in normalized_scene and rule["intent_code"] == intent_code:
-                scene_boost = 1.5
-                break
+        scene_boost = 0.5 if matched_count > 0 and SCENE_INTENT_MAPPING.get(normalized_scene) == rule["intent_code"] else 0.0
         current_score = matched_count + scene_boost
         if current_score > best_score:
             best_rule = rule
             best_score = current_score
+    if best_score == 0 and normalized_scene in SCENE_INTENT_MAPPING:
+        scene_intent_code = SCENE_INTENT_MAPPING[normalized_scene]
+        for rule in FAQ_RULES:
+            if rule["intent_code"] == scene_intent_code:
+                return rule, 0.62
     if best_score == 0:
         return {
             "intent_code": "GENERAL_CONSULT",

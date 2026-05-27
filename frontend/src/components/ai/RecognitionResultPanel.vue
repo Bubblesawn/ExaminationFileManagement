@@ -18,7 +18,7 @@
         <el-col :xs="24" :md="10">
           <div class="summary-block">
             <div class="preview-box">
-              <img v-if="editableResult.file_url" :src="editableResult.file_url" alt="材料预览" />
+              <img v-if="previewImageUrl" :src="previewImageUrl" alt="材料预览" />
               <div v-else class="preview-placeholder">未提供图片地址</div>
             </div>
 
@@ -175,6 +175,7 @@ const resultTitle = computed(() => props.taskName || '请先发起图片识别')
 const candidateRows = computed<MaterialCategoryCandidate[]>(() => editableResult.value.candidates ?? [])
 const objectRows = computed<DetectedObject[]>(() => editableResult.value.objects ?? [])
 const segmentRows = computed<MaterialSegment[]>(() => editableResult.value.segments ?? [])
+const previewImageUrl = computed(() => buildPreviewImageUrl(editableResult.value.file_url))
 
 const confidencePercent = computed({
   get: () => Number(((editableResult.value.confidence ?? 0) * 100).toFixed(1)),
@@ -232,6 +233,24 @@ function confirmResult() {
     result: cloneResult(editableResult.value),
     remark: manualRemark.value.trim()
   })
+}
+
+/**
+ * @brief 生成可在当前前端页面中加载的材料预览地址。
+ *
+ * @details
+ * 后端返回的上传地址是根路径形式，开发环境需要通过 Vite 的 /uploads 代理转发到后端；
+ * 线上若返回完整地址则直接使用，避免破坏已有部署。
+ *
+ * @param fileUrl 后端或算法服务返回的材料文件地址。
+ * @return 可绑定到 img src 的图片访问地址。
+ */
+function buildPreviewImageUrl(fileUrl?: string) {
+  if (!fileUrl) return ''
+  if (/^(https?:)?\/\//i.test(fileUrl) || fileUrl.startsWith('blob:') || fileUrl.startsWith('data:')) {
+    return fileUrl
+  }
+  return fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`
 }
 
 function formatPercent(value?: number) {
