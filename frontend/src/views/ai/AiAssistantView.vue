@@ -4,7 +4,6 @@
       <div>
         <h2 class="page-title">智能辅助</h2>
       </div>
-      <el-tag type="info" effect="plain">第五阶段 5.9 / 5.10</el-tag>
     </div>
 
     <el-tabs v-model="activeTab" class="ai-tabs">

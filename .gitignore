@@ -16,6 +16,7 @@ vite.config.d.ts
 __pycache__/
 *.py[cod]
 .venv/
+.env
 
 # IDE
 .idea/

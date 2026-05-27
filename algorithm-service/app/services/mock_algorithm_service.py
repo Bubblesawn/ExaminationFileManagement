@@ -25,6 +25,15 @@ from app.models.schemas import (
     SpeechRecognitionSegment,
     SpeechSynthesisResult,
 )
+from app.services.deepseek_client import answer_with_deepseek
+from app.services.image_analysis_service import (
+    ImageAnalysis,
+    analyze_image,
+    estimate_visual_confidence,
+    looks_like_certificate_photo,
+    relative_bbox,
+    scale_template_bbox,
+)
 
 SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
@@ -264,14 +273,15 @@ def _contains_keyword(text: str, keywords: list[str]) -> bool:
     return any(keyword.lower() in text for keyword in keywords)
 
 
-def _check_image_quality(file_url: str) -> ImageQualityResult:
-    """@brief 根据文件地址做轻量级质量预检。
+def _check_image_quality(file_url: str, analysis: ImageAnalysis | None = None) -> ImageQualityResult:
+    """@brief 根据真实图片分析结果生成质量预检。
 
     @param file_url 图片文件地址。
+    @param analysis 可复用的图片视觉分析结果。
     @return 图片质量检查结果。
     """
     lower_url = file_url.lower()
-    issues = []
+    issues = list(analysis.issues if analysis else ())
     if not lower_url.endswith(SUPPORTED_IMAGE_SUFFIXES):
         issues.append("UNSUPPORTED_IMAGE_FORMAT")
     if any(keyword in lower_url for keyword in ["blur", "low", "unclear"]):
@@ -294,10 +304,13 @@ def _score_category(rule: dict, text: str) -> float:
     return min(0.96, 0.62 + matched_count * 0.14)
 
 
-def _build_material_candidates(request: ImageTaskRequest) -> list[MaterialCategoryCandidate]:
+def _build_material_candidates(
+        request: ImageTaskRequest,
+        analysis: ImageAnalysis | None = None) -> list[MaterialCategoryCandidate]:
     """@brief 生成材料类别候选结果。
 
     @param request 图片算法任务请求。
+    @param analysis 图片视觉分析结果。
     @return 按置信度倒序排列的材料类别候选项。
     """
     text = _normalize_text(request.file_url, request.file_name, request.material_type_hint, request.scene)
@@ -309,74 +322,111 @@ def _build_material_candidates(request: ImageTaskRequest) -> list[MaterialCatego
         )
         for category_code, rule in MATERIAL_CATEGORY_RULES.items()
     ]
+    if analysis and looks_like_certificate_photo(analysis):
+        candidates.append(
+            MaterialCategoryCandidate(
+                category_code="PHOTO",
+                category_name=MATERIAL_CATEGORY_RULES["PHOTO"]["name"],
+                confidence=0.82,
+            )
+        )
     return sorted(candidates, key=lambda item: item.confidence, reverse=True)[:3]
 
 
-def _match_material_category(request: ImageTaskRequest) -> str:
+def _match_material_category(request: ImageTaskRequest, analysis: ImageAnalysis | None = None) -> str:
     """@brief 根据请求信息匹配材料类别。
 
     @param request 图片算法任务请求。
+    @param analysis 图片视觉分析结果。
     @return 最匹配的材料类别编码。
     """
-    return _build_material_candidates(request)[0].category_code
+    return _build_material_candidates(request, analysis)[0].category_code
 
 
-def _build_detected_objects(category_code: str, file_url: str) -> list[DetectedObject]:
-    """@brief 根据材料类别生成关键区域检测结果。
+def _build_detected_objects(
+        category_code: str,
+        file_url: str,
+        analysis: ImageAnalysis | None = None) -> list[DetectedObject]:
+    """@brief 根据真实图片尺寸和材料类别生成关键区域检测结果。
 
     @param category_code 材料类别编码。
     @param file_url 图片文件地址。
+    @param analysis 图片视觉分析结果。
     @return 关键区域检测对象列表。
     """
-    detected_objects = [
-        DetectedObject(
-            object_code=object_code,
-            object_name=object_name,
-            confidence=confidence,
-            bbox=ObjectBoundingBox(x=x, y=y, width=width, height=height),
-            risk_level=risk_level,
-            remark=remark,
+    visual_analysis = analysis or analyze_image(file_url)
+    detected_objects = []
+    for object_code, object_name, confidence, template_bbox, risk_level, remark in OBJECT_DETECT_RULES.get(
+            category_code, OBJECT_DETECT_RULES["ID_CARD"]):
+        bbox = scale_template_bbox(template_bbox, visual_analysis)
+        detected_objects.append(
+            DetectedObject(
+                object_code=object_code,
+                object_name=object_name,
+                confidence=estimate_visual_confidence(confidence, visual_analysis),
+                bbox=ObjectBoundingBox(x=bbox.x, y=bbox.y, width=bbox.width, height=bbox.height),
+                risk_level=risk_level,
+                remark=f"{remark}；已按真实图片尺寸和主体边界定位",
+            )
         )
-        for object_code, object_name, confidence, (x, y, width, height), risk_level, remark
-        in OBJECT_DETECT_RULES.get(category_code, OBJECT_DETECT_RULES["ID_CARD"])
-    ]
     if any(keyword in file_url.lower() for keyword in ["blocked", "cover", "occlusion"]):
+        bbox = relative_bbox(0.58, 0.2, 0.18, 0.12, visual_analysis)
         detected_objects.append(
             DetectedObject(
                 object_code="OCCLUSION_RISK",
                 object_name="疑似遮挡区域",
-                confidence=0.74,
-                bbox=ObjectBoundingBox(x=310, y=140, width=96, height=72),
+                confidence=estimate_visual_confidence(0.74, visual_analysis),
+                bbox=ObjectBoundingBox(x=bbox.x, y=bbox.y, width=bbox.width, height=bbox.height),
                 risk_level="HIGH",
                 remark="检测到疑似遮挡，建议退回重传或人工复核",
+            )
+        )
+    if visual_analysis.loaded and (
+            "BLUR_RISK" in visual_analysis.issues
+            or "LOW_CONTRAST" in visual_analysis.issues
+            or "LOW_LIGHT" in visual_analysis.issues):
+        bbox = relative_bbox(0.08, 0.08, 0.84, 0.84, visual_analysis)
+        detected_objects.append(
+            DetectedObject(
+                object_code="QUALITY_RISK",
+                object_name="图像质量风险区域",
+                confidence=0.7,
+                bbox=ObjectBoundingBox(x=bbox.x, y=bbox.y, width=bbox.width, height=bbox.height),
+                risk_level="MEDIUM",
+                remark=f"图片存在质量风险：{', '.join(visual_analysis.issues)}",
             )
         )
     return detected_objects
 
 
-def _build_document_segment(category_code: str) -> MaterialSegment:
-    """@brief 生成整张材料主体分割区域。
+def _build_document_segment(category_code: str, analysis: ImageAnalysis) -> MaterialSegment:
+    """@brief 根据真实图片主体边界生成整张材料主体分割区域。
 
     @param category_code 材料类别编码。
+    @param analysis 图片视觉分析结果。
     @return 材料主体分割区域。
     """
-    margin_x = 24
-    margin_y = 28
-    width = DEFAULT_IMAGE_WIDTH - margin_x * 2
-    height = DEFAULT_IMAGE_HEIGHT - margin_y * 2
-    bbox = ObjectBoundingBox(x=margin_x, y=margin_y, width=width, height=height)
+    visual_bbox = analysis.document_bbox or relative_bbox(0.04, 0.04, 0.92, 0.92, analysis)
+    image_width = analysis.width or DEFAULT_IMAGE_WIDTH
+    image_height = analysis.height or DEFAULT_IMAGE_HEIGHT
+    bbox = ObjectBoundingBox(
+        x=visual_bbox.x,
+        y=visual_bbox.y,
+        width=visual_bbox.width,
+        height=visual_bbox.height,
+    )
     return MaterialSegment(
         segment_code=f"{category_code}_DOCUMENT",
         segment_name="材料主体区域",
         segment_type="DOCUMENT",
-        confidence=0.9,
+        confidence=estimate_visual_confidence(0.9, analysis),
         bbox=bbox,
         polygon=_rectangle_to_polygon(bbox),
         mask_url=f"/mock/masks/{category_code.lower()}-document.png",
-        area_ratio=round((width * height) / (DEFAULT_IMAGE_WIDTH * DEFAULT_IMAGE_HEIGHT), 4),
+        area_ratio=round((bbox.width * bbox.height) / (image_width * image_height), 4),
         extraction_priority=1,
-        need_manual_review=False,
-        remark="用于裁剪材料主体并去除图片边缘背景",
+        need_manual_review=not analysis.loaded or bool(analysis.issues),
+        remark="根据真实图片主体边界生成，用于裁剪材料主体并去除边缘背景",
     )
 
 
@@ -396,19 +446,23 @@ def _rectangle_to_polygon(bbox: ObjectBoundingBox) -> list[SegmentationPoint]:
     ]
 
 
-def _build_segments(category_code: str, file_url: str) -> list[MaterialSegment]:
+def _build_segments(category_code: str, file_url: str, analysis: ImageAnalysis | None = None) -> list[MaterialSegment]:
     """@brief 根据目标检测结果生成图像分割区域。
 
     @param category_code 材料类别编码。
     @param file_url 图片文件地址。
+    @param analysis 图片视觉分析结果。
     @return 可用于材料区域提取的分割结果列表。
     """
-    segments = [_build_document_segment(category_code)]
-    for index, detected_object in enumerate(_build_detected_objects(category_code, file_url), start=2):
+    visual_analysis = analysis or analyze_image(file_url)
+    image_width = visual_analysis.width or DEFAULT_IMAGE_WIDTH
+    image_height = visual_analysis.height or DEFAULT_IMAGE_HEIGHT
+    segments = [_build_document_segment(category_code, visual_analysis)]
+    for index, detected_object in enumerate(_build_detected_objects(category_code, file_url, visual_analysis), start=2):
         segment_type = SEGMENT_TYPE_MAPPING.get(detected_object.object_code, "TEXT")
         segment_name = SEGMENT_NAME_MAPPING.get(detected_object.object_code, detected_object.object_name)
         bbox = detected_object.bbox
-        area_ratio = round((bbox.width * bbox.height) / (DEFAULT_IMAGE_WIDTH * DEFAULT_IMAGE_HEIGHT), 4)
+        area_ratio = round((bbox.width * bbox.height) / (image_width * image_height), 4)
         is_risk_segment = detected_object.risk_level in {"MEDIUM", "HIGH"} or segment_type == "RISK"
         segments.append(
             MaterialSegment(
@@ -460,8 +514,9 @@ def _build_classified_application_materials(
             file_name=item.file_name,
             material_type_hint=item.material_type_hint or item.uploaded_category_code,
         )
-        quality = _check_image_quality(item.file_url)
-        candidates = _build_material_candidates(image_request)
+        analysis = analyze_image(item.file_url)
+        quality = _check_image_quality(item.file_url, analysis)
+        candidates = _build_material_candidates(image_request, analysis)
         best_candidate = candidates[0]
         suggested_action, need_manual_review = _decide_classify_action(best_candidate.confidence, quality)
         if item.uploaded_category_code and item.uploaded_category_code != best_candidate.category_code:
@@ -657,6 +712,27 @@ def _build_chat_references(rule: dict) -> list[ChatReference]:
     ]
 
 
+def _normalize_deepseek_intent_code(intent_code: str | None, fallback_intent_code: str) -> str:
+    """@brief 约束 DeepSeek 返回的意图编码范围。
+
+    @param intent_code 模型返回的意图编码。
+    @param fallback_intent_code 本地规则命中的兜底意图编码。
+    @return 合法的业务意图编码。
+    """
+    allowed_intent_codes = {
+        "ARCHIVE_QUERY",
+        "MATERIAL_UPLOAD",
+        "EXEMPTION_APPLY",
+        "COURSE_REPLACE",
+        "TRANSFER_PROCESS",
+        "GRADUATION_APPLY",
+        "GENERAL_CONSULT",
+    }
+    if intent_code in allowed_intent_codes:
+        return intent_code
+    return fallback_intent_code
+
+
 def _mock_recognized_text(audio_url: str) -> str:
     """@brief 根据音频地址模拟识别文本。
 
@@ -704,8 +780,9 @@ def classify_image(request: ImageTaskRequest) -> dict:
         return _fail(400, "图片文件地址不能为空")
     if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
         return _fail(415, "文件格式不支持")
-    quality = _check_image_quality(request.file_url)
-    candidates = _build_material_candidates(request)
+    analysis = analyze_image(request.file_url)
+    quality = _check_image_quality(request.file_url, analysis)
+    candidates = _build_material_candidates(request, analysis)
     best_candidate = candidates[0]
     suggested_action, need_manual_review = _decide_classify_action(best_candidate.confidence, quality)
     result = ImageClassifyResult(
@@ -793,9 +870,10 @@ def detect_objects(request: ImageTaskRequest) -> dict:
         return _fail(400, "图片文件地址不能为空")
     if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
         return _fail(415, "文件格式不支持")
-    quality = _check_image_quality(request.file_url)
-    category_code = _match_material_category(request)
-    objects = _build_detected_objects(category_code, request.file_url)
+    analysis = analyze_image(request.file_url)
+    quality = _check_image_quality(request.file_url, analysis)
+    category_code = _match_material_category(request, analysis)
+    objects = _build_detected_objects(category_code, request.file_url, analysis)
     has_high_risk = any(item.risk_level == "HIGH" for item in objects)
     suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_high_risk else "ACCEPT"
     result = ObjectDetectResult(
@@ -821,10 +899,11 @@ def segment_image(request: ImageTaskRequest) -> dict:
         return _fail(400, "图片文件地址不能为空")
     if not request.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
         return _fail(415, "文件格式不支持")
-    quality = _check_image_quality(request.file_url)
-    category_code = _match_material_category(request)
+    analysis = analyze_image(request.file_url)
+    quality = _check_image_quality(request.file_url, analysis)
+    category_code = _match_material_category(request, analysis)
     category_name = MATERIAL_CATEGORY_RULES[category_code]["name"]
-    segments = _build_segments(category_code, request.file_url)
+    segments = _build_segments(category_code, request.file_url, analysis)
     has_review_segment = any(item.need_manual_review for item in segments)
     suggested_action = "REJECT" if not quality.readable else "REVIEW" if has_review_segment else "ACCEPT"
     result = ImageSegmentResult(
@@ -834,8 +913,8 @@ def segment_image(request: ImageTaskRequest) -> dict:
         material_type_hint=request.material_type_hint,
         category_code=category_code,
         category_name=category_name,
-        image_width=DEFAULT_IMAGE_WIDTH,
-        image_height=DEFAULT_IMAGE_HEIGHT,
+        image_width=analysis.width or DEFAULT_IMAGE_WIDTH,
+        image_height=analysis.height or DEFAULT_IMAGE_HEIGHT,
         segments=segments,
         quality=quality,
         suggested_action=suggested_action,
@@ -853,6 +932,26 @@ def answer_question(request: ChatRequest) -> dict:
     if not request.content.strip():
         return _fail(400, "问题内容不能为空")
     rule, confidence = _match_faq_rule(request.content, request.scene)
+    local_references = [item.model_dump() for item in _build_chat_references(rule)]
+    matched_intent = {"intent_code": rule["intent_code"], "intent_name": rule["intent_name"]}
+    deepseek_answer = answer_with_deepseek(request.content, request.scene, local_references, matched_intent)
+    if _is_deepseek_answer_usable(deepseek_answer):
+        result = ChatAnswerResult(
+            business_id=request.business_id,
+            question=request.content,
+            scene=request.scene,
+            intent_code=_normalize_deepseek_intent_code(deepseek_answer.get("intent_code"), rule["intent_code"]),
+            intent_name=deepseek_answer.get("intent_name") or rule["intent_name"],
+            answer=deepseek_answer.get("answer") or rule["answer"],
+            confidence=max(confidence, deepseek_answer.get("confidence", confidence)),
+            references=_build_chat_references(rule),
+            suggestions=deepseek_answer.get("suggestions") or rule["suggestions"],
+            need_manual_review=deepseek_answer.get(
+                "need_manual_review",
+                deepseek_answer.get("confidence", confidence) < MIN_REVIEW_CONFIDENCE,
+            ),
+        )
+        return _success(result.model_dump())
     result = ChatAnswerResult(
         business_id=request.business_id,
         question=request.content,
@@ -866,6 +965,19 @@ def answer_question(request: ChatRequest) -> dict:
         need_manual_review=confidence < MIN_REVIEW_CONFIDENCE,
     )
     return _success(result.model_dump())
+
+
+def _is_deepseek_answer_usable(payload: dict | None) -> bool:
+    """@brief 判断 DeepSeek 问答结果是否可直接展示。
+
+    @param payload DeepSeek 返回的结构化问答结果。
+    @return 结果完整且置信度达标时返回 True。
+    """
+    if not payload:
+        return False
+    if not payload.get("answer"):
+        return False
+    return float(payload.get("confidence", 0)) >= MIN_REVIEW_CONFIDENCE
 
 
 def recognize_speech(request: SpeechRequest) -> dict:

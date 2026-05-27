@@ -49,7 +49,17 @@ python -m venv .venv
 
 python -m pip install -r requirements.txt
 
+# 首次接入 DeepSeek 时复制一份本地配置，并填写自己的 API Key
+copy .env.example .env
+
 python -m uvicorn app.main:app --host 127.0.0.1 --port 9000 --reload
 ```
 
 默认地址：`http://localhost:9000`
+
+DeepSeek 配置项：
+
+- `DEEPSEEK_API_KEY`：DeepSeek API Key，本地 `.env` 保存，禁止提交到仓库。
+- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
+- `DEEPSEEK_MODEL`：默认 `deepseek-v4-flash`。
+- `MATERIAL_UPLOAD_ROOT`：算法服务读取后端上传图片的材料目录。
