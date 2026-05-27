@@ -10,6 +10,7 @@ import com.exam.record.mapper.SysUserMapper;
 import com.exam.record.service.AuthService;
 import com.exam.record.util.AuthTokenUtil;
 import com.exam.record.util.ClientIpUtil;
+import com.exam.record.util.PasswordUtil;
 import com.exam.record.vo.LoginUserVO;
 import com.exam.record.vo.LoginVO;
 import com.exam.record.vo.TokenUserVO;
@@ -17,11 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,8 +30,6 @@ public class AuthServiceImpl implements AuthService {
     private static final String STATUS_ENABLED = "ENABLED";
     private static final String LOGIN_SUCCESS = "SUCCESS";
     private static final String LOGIN_FAIL = "FAIL";
-    private static final String NOOP_PREFIX = "{noop}";
-    private static final String SHA256_PREFIX = "{sha256}";
 
     private final SysUserMapper sysUserMapper;
     private final SysLoginLogMapper sysLoginLogMapper;
@@ -80,7 +75,7 @@ public class AuthServiceImpl implements AuthService {
             recordLoginLog(dto.getUsername(), user.getId(), LOGIN_FAIL, "账号已禁用", request);
             throw new BusinessException(403, "账号已禁用，请联系管理员");
         }
-        if (!matchesPassword(dto.getPassword(), user.getPassword())) {
+        if (!PasswordUtil.matches(dto.getPassword(), user.getPassword())) {
             recordLoginLog(dto.getUsername(), user.getId(), LOGIN_FAIL, "密码错误", request);
             throw new BusinessException(401, "账号或密码错误");
         }
@@ -118,29 +113,6 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(401, "登录凭证已退出");
         }
         return authTokenUtil.parseToken(token);
-    }
-
-    private boolean matchesPassword(String rawPassword, String storedPassword) {
-        if (!StringUtils.hasText(storedPassword)) {
-            return false;
-        }
-        if (storedPassword.startsWith(NOOP_PREFIX)) {
-            return rawPassword.equals(storedPassword.substring(NOOP_PREFIX.length()));
-        }
-        if (storedPassword.startsWith(SHA256_PREFIX)) {
-            return sha256(rawPassword).equalsIgnoreCase(storedPassword.substring(SHA256_PREFIX.length()));
-        }
-        return rawPassword.equals(storedPassword);
-    }
-
-    private String sha256(String rawPassword) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(rawPassword.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(bytes);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("密码摘要算法不可用", exception);
-        }
     }
 
     private void recordLoginLog(String username,
