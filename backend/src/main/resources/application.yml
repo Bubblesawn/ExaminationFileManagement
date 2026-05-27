@@ -35,3 +35,7 @@ algorithm:
   service:
     base-url: http://localhost:9000/api
     api-key: examination-algorithm-local-key
+
+file:
+  storage:
+    material-root: uploads/materials

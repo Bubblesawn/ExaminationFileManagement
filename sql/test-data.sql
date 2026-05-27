@@ -222,6 +222,34 @@ SET @record_wang := (SELECT id FROM student_record WHERE record_no = 'KJ20260003
 SET @record_chen := (SELECT id FROM student_record WHERE record_no = 'KJ20260004');
 
 -- 测试材料信息。
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'ID_CARD', '身份证材料', '用于核验考生身份信息。', 10, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'ID_CARD');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'ADMISSION_TICKET', '准考证材料', '用于核验准考证号和考籍关联信息。', 20, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'ADMISSION_TICKET');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'DIPLOMA', '学历证书材料', '用于学历层次和毕业资格佐证。', 30, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'DIPLOMA');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'TRANSCRIPT', '成绩单材料', '用于课程成绩、免考和毕业审核。', 40, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'TRANSCRIPT');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'COURSE_EXEMPTION', '课程免考证明', '用于课程免考业务申请。', 50, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'COURSE_EXEMPTION');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'TRANSFER', '转考申请材料', '用于考籍转入转出业务申请。', 60, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'TRANSFER');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'GRADUATION', '毕业申请材料', '用于毕业申请业务审核。', 70, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'GRADUATION');
+
 INSERT INTO record_material (record_id, material_type, file_name, file_url, audit_status)
 SELECT @record_zhang, 'ID_CARD', '张明身份证扫描件.pdf', '/uploads/materials/zhangming-id-card.pdf', 'APPROVED'
 WHERE NOT EXISTS (

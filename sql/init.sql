@@ -259,6 +259,20 @@ CREATE TABLE IF NOT EXISTS record_material (
     KEY idx_record_material_audit_status (audit_status)
 ) COMMENT='考籍材料表';
 
+CREATE TABLE IF NOT EXISTS material_type (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    type_code VARCHAR(64) NOT NULL COMMENT '材料类型编码',
+    type_name VARCHAR(128) NOT NULL COMMENT '材料类型名称',
+    description VARCHAR(512) COMMENT '类型说明',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '排序值',
+    status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '状态：ENABLED 启用，DISABLED 禁用',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_material_type_code (type_code),
+    KEY idx_material_type_status (status),
+    KEY idx_material_type_sort (sort_order)
+) COMMENT='材料类型表';
+
 CREATE TABLE IF NOT EXISTS record_status_log (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     record_id BIGINT NOT NULL COMMENT '考籍档案ID',
@@ -355,6 +369,17 @@ ALTER TABLE record_material
     MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     COMMENT = '考籍材料表';
+
+ALTER TABLE material_type
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY type_code VARCHAR(64) NOT NULL COMMENT '材料类型编码',
+    MODIFY type_name VARCHAR(128) NOT NULL COMMENT '材料类型名称',
+    MODIFY description VARCHAR(512) NULL COMMENT '类型说明',
+    MODIFY sort_order INT NOT NULL DEFAULT 0 COMMENT '排序值',
+    MODIFY status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '状态：ENABLED 启用，DISABLED 禁用',
+    MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    COMMENT = '材料类型表';
 
 ALTER TABLE record_status_log
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
