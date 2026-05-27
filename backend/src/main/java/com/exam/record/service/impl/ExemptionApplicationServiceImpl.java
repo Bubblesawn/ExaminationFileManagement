@@ -40,7 +40,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -446,7 +445,6 @@ public class ExemptionApplicationServiceImpl extends ServiceImpl<BusinessApplica
     private ExemptionApplicationVO buildVO(BusinessApplication application,
                                            Map<Long, StudentRecord> recordMap,
                                            Map<Long, Candidate> candidateMap) {
-        fillExemptionFieldsFromSnapshot(application);
         return ExemptionApplicationVO.fromEntity(
                 application,
                 recordMap.get(application.getRecordId()),
@@ -593,15 +591,6 @@ public class ExemptionApplicationServiceImpl extends ServiceImpl<BusinessApplica
         } catch (JsonProcessingException exception) {
             throw new BusinessException(500, "免考申请扩展字段序列化失败：" + exception.getMessage());
         }
-    }
-
-    private void fillExemptionFieldsFromSnapshot(BusinessApplication application) {
-        Map<String, String> extensionData = parseExtensionData(application);
-        application.setCourseCode(extensionData.get(FIELD_COURSE_CODE));
-        application.setCourseName(extensionData.get(FIELD_COURSE_NAME));
-        application.setSourceCourseCode(extensionData.get(FIELD_SOURCE_COURSE_CODE));
-        application.setSourceCourseName(extensionData.get(FIELD_SOURCE_COURSE_NAME));
-        application.setExemptionReason(extensionData.get(FIELD_EXEMPTION_REASON));
     }
 
     private String buildApplicationTitle(String courseName) {
