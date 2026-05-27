@@ -198,23 +198,42 @@ CREATE TABLE IF NOT EXISTS candidate (
     gender VARCHAR(16) COMMENT '性别',
     id_card VARCHAR(32) NOT NULL COMMENT '身份证号',
     admission_no VARCHAR(64) COMMENT '准考证号',
+    birth_date DATE COMMENT '出生日期',
+    nation VARCHAR(32) COMMENT '民族',
+    political_status VARCHAR(32) COMMENT '政治面貌',
+    education_level VARCHAR(32) COMMENT '学历层次',
+    major_name VARCHAR(128) COMMENT '报考专业',
     phone VARCHAR(32) COMMENT '联系电话',
+    email VARCHAR(128) COMMENT '电子邮箱',
+    address VARCHAR(255) COMMENT '联系地址',
     status VARCHAR(32) NOT NULL DEFAULT 'NORMAL' COMMENT '考生状态',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    UNIQUE KEY uk_candidate_id_card (id_card)
+    UNIQUE KEY uk_candidate_id_card (id_card),
+    UNIQUE KEY uk_candidate_admission_no (admission_no),
+    KEY idx_candidate_name (name),
+    KEY idx_candidate_status (status)
 ) COMMENT='考生基础信息表';
 
 CREATE TABLE IF NOT EXISTS student_record (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     candidate_id BIGINT NOT NULL COMMENT '考生ID',
     record_no VARCHAR(64) NOT NULL COMMENT '考籍号',
+    enroll_batch VARCHAR(64) COMMENT '注册批次',
+    education_level VARCHAR(32) COMMENT '考籍层次',
+    major_code VARCHAR(64) COMMENT '专业代码',
+    major_name VARCHAR(128) COMMENT '专业名称',
     record_status VARCHAR(32) NOT NULL DEFAULT 'NORMAL' COMMENT '考籍状态',
+    archive_status VARCHAR(32) NOT NULL DEFAULT 'UNARCHIVED' COMMENT '归档状态：UNARCHIVED 未归档，ARCHIVED 已归档',
+    archive_time DATETIME COMMENT '归档时间',
+    archive_operator_id BIGINT COMMENT '归档操作人ID',
     remark VARCHAR(512) COMMENT '备注',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_student_record_no (record_no),
-    KEY idx_student_record_candidate_id (candidate_id)
+    KEY idx_student_record_candidate_id (candidate_id),
+    KEY idx_student_record_status (record_status),
+    KEY idx_student_record_archive_status (archive_status)
 ) COMMENT='考籍档案表';
 
 CREATE TABLE IF NOT EXISTS record_material (
@@ -222,11 +241,53 @@ CREATE TABLE IF NOT EXISTS record_material (
     record_id BIGINT NOT NULL COMMENT '考籍档案ID',
     material_type VARCHAR(64) NOT NULL COMMENT '材料类型',
     file_name VARCHAR(255) NOT NULL COMMENT '文件名称',
+    original_file_name VARCHAR(255) COMMENT '原始文件名称',
     file_url VARCHAR(512) NOT NULL COMMENT '文件地址',
+    file_size BIGINT COMMENT '文件大小，单位字节',
+    file_suffix VARCHAR(32) COMMENT '文件后缀',
+    mime_type VARCHAR(128) COMMENT '文件 MIME 类型',
+    preview_url VARCHAR(512) COMMENT '预览地址',
+    upload_user_id BIGINT COMMENT '上传人ID',
     audit_status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT '审核状态',
+    audit_opinion VARCHAR(512) COMMENT '审核意见',
+    audit_user_id BIGINT COMMENT '审核人ID',
+    audit_time DATETIME COMMENT '审核时间',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    KEY idx_record_material_record_id (record_id)
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    KEY idx_record_material_record_id (record_id),
+    KEY idx_record_material_type (material_type),
+    KEY idx_record_material_audit_status (audit_status)
 ) COMMENT='考籍材料表';
+
+CREATE TABLE IF NOT EXISTS record_status_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    before_status VARCHAR(32) COMMENT '变更前状态',
+    after_status VARCHAR(32) NOT NULL COMMENT '变更后状态',
+    change_reason VARCHAR(512) COMMENT '状态变更原因',
+    operator_id BIGINT COMMENT '操作人ID',
+    operator_name VARCHAR(64) COMMENT '操作人姓名',
+    operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    KEY idx_record_status_log_record_id (record_id),
+    KEY idx_record_status_log_operation_time (operation_time),
+    KEY idx_record_status_log_after_status (after_status)
+) COMMENT='档案状态记录表';
+
+CREATE TABLE IF NOT EXISTS record_change_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    change_type VARCHAR(64) NOT NULL COMMENT '变更类型',
+    change_field VARCHAR(128) COMMENT '变更字段',
+    before_value TEXT COMMENT '变更前内容',
+    after_value TEXT COMMENT '变更后内容',
+    change_reason VARCHAR(512) COMMENT '变更原因',
+    operator_id BIGINT COMMENT '操作人ID',
+    operator_name VARCHAR(64) COMMENT '操作人姓名',
+    operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    KEY idx_record_change_log_record_id (record_id),
+    KEY idx_record_change_log_change_type (change_type),
+    KEY idx_record_change_log_operation_time (operation_time)
+) COMMENT='档案变更记录表';
 
 CREATE TABLE IF NOT EXISTS audit_record (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
@@ -245,7 +306,14 @@ ALTER TABLE candidate
     MODIFY gender VARCHAR(16) NULL COMMENT '性别',
     MODIFY id_card VARCHAR(32) NOT NULL COMMENT '身份证号',
     MODIFY admission_no VARCHAR(64) NULL COMMENT '准考证号',
+    MODIFY birth_date DATE NULL COMMENT '出生日期',
+    MODIFY nation VARCHAR(32) NULL COMMENT '民族',
+    MODIFY political_status VARCHAR(32) NULL COMMENT '政治面貌',
+    MODIFY education_level VARCHAR(32) NULL COMMENT '学历层次',
+    MODIFY major_name VARCHAR(128) NULL COMMENT '报考专业',
     MODIFY phone VARCHAR(32) NULL COMMENT '联系电话',
+    MODIFY email VARCHAR(128) NULL COMMENT '电子邮箱',
+    MODIFY address VARCHAR(255) NULL COMMENT '联系地址',
     MODIFY status VARCHAR(32) NOT NULL DEFAULT 'NORMAL' COMMENT '考生状态',
     MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -255,7 +323,14 @@ ALTER TABLE student_record
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
     MODIFY candidate_id BIGINT NOT NULL COMMENT '考生ID',
     MODIFY record_no VARCHAR(64) NOT NULL COMMENT '考籍号',
+    MODIFY enroll_batch VARCHAR(64) NULL COMMENT '注册批次',
+    MODIFY education_level VARCHAR(32) NULL COMMENT '考籍层次',
+    MODIFY major_code VARCHAR(64) NULL COMMENT '专业代码',
+    MODIFY major_name VARCHAR(128) NULL COMMENT '专业名称',
     MODIFY record_status VARCHAR(32) NOT NULL DEFAULT 'NORMAL' COMMENT '考籍状态',
+    MODIFY archive_status VARCHAR(32) NOT NULL DEFAULT 'UNARCHIVED' COMMENT '归档状态：UNARCHIVED 未归档，ARCHIVED 已归档',
+    MODIFY archive_time DATETIME NULL COMMENT '归档时间',
+    MODIFY archive_operator_id BIGINT NULL COMMENT '归档操作人ID',
     MODIFY remark VARCHAR(512) NULL COMMENT '备注',
     MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -266,10 +341,44 @@ ALTER TABLE record_material
     MODIFY record_id BIGINT NOT NULL COMMENT '考籍档案ID',
     MODIFY material_type VARCHAR(64) NOT NULL COMMENT '材料类型',
     MODIFY file_name VARCHAR(255) NOT NULL COMMENT '文件名称',
+    MODIFY original_file_name VARCHAR(255) NULL COMMENT '原始文件名称',
     MODIFY file_url VARCHAR(512) NOT NULL COMMENT '文件地址',
+    MODIFY file_size BIGINT NULL COMMENT '文件大小，单位字节',
+    MODIFY file_suffix VARCHAR(32) NULL COMMENT '文件后缀',
+    MODIFY mime_type VARCHAR(128) NULL COMMENT '文件 MIME 类型',
+    MODIFY preview_url VARCHAR(512) NULL COMMENT '预览地址',
+    MODIFY upload_user_id BIGINT NULL COMMENT '上传人ID',
     MODIFY audit_status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT '审核状态',
+    MODIFY audit_opinion VARCHAR(512) NULL COMMENT '审核意见',
+    MODIFY audit_user_id BIGINT NULL COMMENT '审核人ID',
+    MODIFY audit_time DATETIME NULL COMMENT '审核时间',
     MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     COMMENT = '考籍材料表';
+
+ALTER TABLE record_status_log
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    MODIFY before_status VARCHAR(32) NULL COMMENT '变更前状态',
+    MODIFY after_status VARCHAR(32) NOT NULL COMMENT '变更后状态',
+    MODIFY change_reason VARCHAR(512) NULL COMMENT '状态变更原因',
+    MODIFY operator_id BIGINT NULL COMMENT '操作人ID',
+    MODIFY operator_name VARCHAR(64) NULL COMMENT '操作人姓名',
+    MODIFY operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    COMMENT = '档案状态记录表';
+
+ALTER TABLE record_change_log
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    MODIFY change_type VARCHAR(64) NOT NULL COMMENT '变更类型',
+    MODIFY change_field VARCHAR(128) NULL COMMENT '变更字段',
+    MODIFY before_value TEXT NULL COMMENT '变更前内容',
+    MODIFY after_value TEXT NULL COMMENT '变更后内容',
+    MODIFY change_reason VARCHAR(512) NULL COMMENT '变更原因',
+    MODIFY operator_id BIGINT NULL COMMENT '操作人ID',
+    MODIFY operator_name VARCHAR(64) NULL COMMENT '操作人姓名',
+    MODIFY operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    COMMENT = '档案变更记录表';
 
 ALTER TABLE audit_record
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
