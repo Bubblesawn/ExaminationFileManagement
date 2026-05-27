@@ -22,6 +22,7 @@ import java.util.List;
 @Service
 public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate> implements CandidateService {
     private static final String STATUS_NORMAL = "NORMAL";
+    private static final String STATUS_LOCKED = "LOCKED";
     private static final String STATUS_DISABLED = "DISABLED";
     private static final List<String> IMPORT_EXPECTED_HEADERS = List.of(
             "姓名", "性别", "身份证号", "准考证号", "出生日期", "民族", "政治面貌",
@@ -202,9 +203,17 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         }
     }
 
+    /**
+     * @brief 校验考生状态值是否合法。
+     *
+     * @details
+     * 考生状态与数据库设计、测试数据和前端状态选项保持一致，允许正常、锁定和停用三种状态。
+     *
+     * @param status 待校验的考生状态编码。
+     */
     private void validateStatus(String status) {
-        if (!STATUS_NORMAL.equals(status) && !STATUS_DISABLED.equals(status)) {
-            throw new BusinessException(400, "考生状态只能为NORMAL或DISABLED");
+        if (!STATUS_NORMAL.equals(status) && !STATUS_LOCKED.equals(status) && !STATUS_DISABLED.equals(status)) {
+            throw new BusinessException(400, "考生状态只能为NORMAL、LOCKED或DISABLED");
         }
     }
 }
