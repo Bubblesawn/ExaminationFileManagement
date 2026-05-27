@@ -273,6 +273,27 @@ CREATE TABLE IF NOT EXISTS material_type (
     KEY idx_material_type_sort (sort_order)
 ) COMMENT='材料类型表';
 
+CREATE TABLE IF NOT EXISTS course_replacement_rule (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    source_course_code VARCHAR(64) NOT NULL COMMENT '原课程代码',
+    source_course_name VARCHAR(128) NOT NULL COMMENT '原课程名称',
+    target_course_code VARCHAR(64) NOT NULL COMMENT '顶替课程代码',
+    target_course_name VARCHAR(128) NOT NULL COMMENT '顶替课程名称',
+    major_code VARCHAR(64) COMMENT '适用专业代码，空值表示通用规则',
+    education_level VARCHAR(32) COMMENT '适用学历层次，空值表示通用规则',
+    credit DECIMAL(5,2) COMMENT '顶替课程学分',
+    rule_status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '规则状态：ENABLED 启用，DISABLED 禁用',
+    effective_date DATE COMMENT '生效日期',
+    expire_date DATE COMMENT '失效日期',
+    remark VARCHAR(512) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_course_replacement_rule_scope (source_course_code, target_course_code, major_code),
+    KEY idx_course_replacement_rule_source (source_course_code),
+    KEY idx_course_replacement_rule_target (target_course_code),
+    KEY idx_course_replacement_rule_status (rule_status)
+) COMMENT='课程顶替规则表';
+
 CREATE TABLE IF NOT EXISTS record_status_log (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
     record_id BIGINT NOT NULL COMMENT '考籍档案ID',
@@ -305,14 +326,97 @@ CREATE TABLE IF NOT EXISTS record_change_log (
 
 CREATE TABLE IF NOT EXISTS audit_record (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    application_id BIGINT COMMENT '通用申请ID，关联 business_application.id',
     business_type VARCHAR(64) NOT NULL COMMENT '业务类型',
     business_id BIGINT NOT NULL COMMENT '业务ID',
+    record_id BIGINT COMMENT '考籍档案ID',
+    audit_action VARCHAR(32) NOT NULL DEFAULT 'SUBMIT' COMMENT '流程动作：SUBMIT 提交，APPROVE 通过，REJECT 驳回，WITHDRAW 撤回',
+    before_status VARCHAR(32) COMMENT '操作前申请状态',
+    after_status VARCHAR(32) NOT NULL COMMENT '操作后申请状态',
     audit_status VARCHAR(32) NOT NULL COMMENT '审核状态',
-    audit_opinion VARCHAR(512) COMMENT '审核意见',
-    auditor_id BIGINT COMMENT '审核人ID',
+    audit_opinion VARCHAR(512) COMMENT '审核意见或流程说明',
+    auditor_id BIGINT COMMENT '审核人或操作人ID',
+    auditor_name VARCHAR(64) COMMENT '审核人或操作人姓名',
+    operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    KEY idx_audit_record_business (business_type, business_id)
+    KEY idx_audit_record_application_id (application_id),
+    KEY idx_audit_record_business (business_type, business_id),
+    KEY idx_audit_record_status (audit_status),
+    KEY idx_audit_record_operation_time (operation_time)
 ) COMMENT='审核记录表';
+
+CREATE TABLE IF NOT EXISTS process_status (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    business_type VARCHAR(64) NOT NULL COMMENT '业务类型：EXEMPTION 免考，COURSE_REPLACE 课程顶替，TRANSFER_IN 转入，TRANSFER_OUT 转出，GRADUATION 毕业',
+    status_code VARCHAR(32) NOT NULL COMMENT '流程状态编码',
+    status_name VARCHAR(64) NOT NULL COMMENT '流程状态名称',
+    status_sort INT NOT NULL DEFAULT 0 COMMENT '状态排序',
+    initial_status TINYINT NOT NULL DEFAULT 0 COMMENT '是否初始状态：1 是，0 否',
+    final_status TINYINT NOT NULL DEFAULT 0 COMMENT '是否终态：1 是，0 否',
+    allow_edit TINYINT NOT NULL DEFAULT 0 COMMENT '当前状态是否允许编辑申请：1 是，0 否',
+    allow_withdraw TINYINT NOT NULL DEFAULT 0 COMMENT '当前状态是否允许撤回申请：1 是，0 否',
+    next_status_codes VARCHAR(255) COMMENT '允许流转的下一状态编码，多个用英文逗号分隔',
+    description VARCHAR(512) COMMENT '状态说明',
+    status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '启用状态：ENABLED 启用，DISABLED 禁用',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_process_status_type_code (business_type, status_code),
+    KEY idx_process_status_type_sort (business_type, status_sort),
+    KEY idx_process_status_enabled (status)
+) COMMENT='流程状态表';
+
+CREATE TABLE IF NOT EXISTS business_application (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    application_no VARCHAR(64) NOT NULL COMMENT '申请编号',
+    business_type VARCHAR(64) NOT NULL COMMENT '业务类型：EXEMPTION 免考，COURSE_REPLACE 课程顶替，TRANSFER_IN 转入，TRANSFER_OUT 转出，GRADUATION 毕业',
+    record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    candidate_id BIGINT NOT NULL COMMENT '考生ID',
+    application_title VARCHAR(128) COMMENT '申请标题',
+    application_status VARCHAR(32) NOT NULL DEFAULT 'SUBMITTED' COMMENT '申请状态：DRAFT 草稿，SUBMITTED 已提交，AUDITING 审核中，APPROVED 已通过，REJECTED 已驳回，WITHDRAWN 已撤回',
+    current_node_code VARCHAR(64) COMMENT '当前流程节点编码',
+    current_node_name VARCHAR(64) COMMENT '当前流程节点名称',
+    course_code VARCHAR(64) COMMENT '目标课程代码，免考或课程顶替业务使用',
+    course_name VARCHAR(128) COMMENT '目标课程名称，免考或课程顶替业务使用',
+    source_course_code VARCHAR(64) COMMENT '来源课程代码，免考或课程顶替业务使用',
+    source_course_name VARCHAR(128) COMMENT '来源课程名称，免考或课程顶替业务使用',
+    exemption_reason VARCHAR(512) COMMENT '免考原因',
+    material_ids_json TEXT COMMENT '申请材料ID列表JSON',
+    extension_data_json TEXT COMMENT '业务扩展字段快照JSON',
+    apply_user_id BIGINT COMMENT '提交人ID',
+    apply_user_name VARCHAR(64) COMMENT '提交人姓名',
+    submit_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
+    withdraw_time DATETIME COMMENT '撤回时间',
+    withdraw_reason VARCHAR(512) COMMENT '撤回原因',
+    audit_user_id BIGINT COMMENT '审核人ID',
+    audit_user_name VARCHAR(64) COMMENT '审核人姓名',
+    audit_time DATETIME COMMENT '审核时间',
+    audit_opinion VARCHAR(512) COMMENT '审核意见',
+    remark VARCHAR(512) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_business_application_no (application_no),
+    KEY idx_business_application_type_status (business_type, application_status),
+    KEY idx_business_application_record_id (record_id),
+    KEY idx_business_application_candidate_id (candidate_id),
+    KEY idx_business_application_submit_time (submit_time)
+) COMMENT='通用业务申请表';
+
+CREATE TABLE IF NOT EXISTS application_extension_field (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    application_id BIGINT NOT NULL COMMENT '通用申请ID，关联 business_application.id',
+    business_type VARCHAR(64) NOT NULL COMMENT '业务类型',
+    field_code VARCHAR(64) NOT NULL COMMENT '扩展字段编码',
+    field_name VARCHAR(128) NOT NULL COMMENT '扩展字段名称',
+    field_value TEXT COMMENT '扩展字段值',
+    value_type VARCHAR(32) NOT NULL DEFAULT 'STRING' COMMENT '字段值类型：STRING 字符串，NUMBER 数值，DATE 日期，JSON JSON对象',
+    required_flag TINYINT NOT NULL DEFAULT 0 COMMENT '是否必填：1 是，0 否',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '排序值',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_application_extension_field (application_id, field_code),
+    KEY idx_application_extension_application_id (application_id),
+    KEY idx_application_extension_type_code (business_type, field_code)
+) COMMENT='申请业务扩展字段表';
 
 ALTER TABLE candidate
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
@@ -381,6 +485,23 @@ ALTER TABLE material_type
     MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     COMMENT = '材料类型表';
 
+ALTER TABLE course_replacement_rule
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY source_course_code VARCHAR(64) NOT NULL COMMENT '原课程代码',
+    MODIFY source_course_name VARCHAR(128) NOT NULL COMMENT '原课程名称',
+    MODIFY target_course_code VARCHAR(64) NOT NULL COMMENT '顶替课程代码',
+    MODIFY target_course_name VARCHAR(128) NOT NULL COMMENT '顶替课程名称',
+    MODIFY major_code VARCHAR(64) NULL COMMENT '适用专业代码，空值表示通用规则',
+    MODIFY education_level VARCHAR(32) NULL COMMENT '适用学历层次，空值表示通用规则',
+    MODIFY credit DECIMAL(5,2) NULL COMMENT '顶替课程学分',
+    MODIFY rule_status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '规则状态：ENABLED 启用，DISABLED 禁用',
+    MODIFY effective_date DATE NULL COMMENT '生效日期',
+    MODIFY expire_date DATE NULL COMMENT '失效日期',
+    MODIFY remark VARCHAR(512) NULL COMMENT '备注',
+    MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    COMMENT = '课程顶替规则表';
+
 ALTER TABLE record_status_log
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
     MODIFY record_id BIGINT NOT NULL COMMENT '考籍档案ID',
@@ -407,10 +528,84 @@ ALTER TABLE record_change_log
 
 ALTER TABLE audit_record
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY application_id BIGINT NULL COMMENT '通用申请ID，关联 business_application.id',
     MODIFY business_type VARCHAR(64) NOT NULL COMMENT '业务类型',
     MODIFY business_id BIGINT NOT NULL COMMENT '业务ID',
+    MODIFY record_id BIGINT NULL COMMENT '考籍档案ID',
+    MODIFY audit_action VARCHAR(32) NOT NULL DEFAULT 'SUBMIT' COMMENT '流程动作：SUBMIT 提交，APPROVE 通过，REJECT 驳回，WITHDRAW 撤回',
+    MODIFY before_status VARCHAR(32) NULL COMMENT '操作前申请状态',
+    MODIFY after_status VARCHAR(32) NOT NULL COMMENT '操作后申请状态',
     MODIFY audit_status VARCHAR(32) NOT NULL COMMENT '审核状态',
-    MODIFY audit_opinion VARCHAR(512) NULL COMMENT '审核意见',
-    MODIFY auditor_id BIGINT NULL COMMENT '审核人ID',
+    MODIFY audit_opinion VARCHAR(512) NULL COMMENT '审核意见或流程说明',
+    MODIFY auditor_id BIGINT NULL COMMENT '审核人或操作人ID',
+    MODIFY auditor_name VARCHAR(64) NULL COMMENT '审核人或操作人姓名',
+    MODIFY operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
     MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     COMMENT = '审核记录表';
+
+ALTER TABLE process_status
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY business_type VARCHAR(64) NOT NULL COMMENT '业务类型：EXEMPTION 免考，COURSE_REPLACE 课程顶替，TRANSFER_IN 转入，TRANSFER_OUT 转出，GRADUATION 毕业',
+    MODIFY status_code VARCHAR(32) NOT NULL COMMENT '流程状态编码',
+    MODIFY status_name VARCHAR(64) NOT NULL COMMENT '流程状态名称',
+    MODIFY status_sort INT NOT NULL DEFAULT 0 COMMENT '状态排序',
+    MODIFY initial_status TINYINT NOT NULL DEFAULT 0 COMMENT '是否初始状态：1 是，0 否',
+    MODIFY final_status TINYINT NOT NULL DEFAULT 0 COMMENT '是否终态：1 是，0 否',
+    MODIFY allow_edit TINYINT NOT NULL DEFAULT 0 COMMENT '当前状态是否允许编辑申请：1 是，0 否',
+    MODIFY allow_withdraw TINYINT NOT NULL DEFAULT 0 COMMENT '当前状态是否允许撤回申请：1 是，0 否',
+    MODIFY next_status_codes VARCHAR(255) NULL COMMENT '允许流转的下一状态编码，多个用英文逗号分隔',
+    MODIFY description VARCHAR(512) NULL COMMENT '状态说明',
+    MODIFY status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT '启用状态：ENABLED 启用，DISABLED 禁用',
+    MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    COMMENT = '流程状态表';
+
+ALTER TABLE business_application
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY application_no VARCHAR(64) NOT NULL COMMENT '申请编号',
+    MODIFY business_type VARCHAR(64) NOT NULL COMMENT '业务类型：EXEMPTION 免考，COURSE_REPLACE 课程顶替，TRANSFER_IN 转入，TRANSFER_OUT 转出，GRADUATION 毕业',
+    MODIFY record_id BIGINT NOT NULL COMMENT '考籍档案ID',
+    MODIFY candidate_id BIGINT NOT NULL COMMENT '考生ID',
+    MODIFY application_title VARCHAR(128) NULL COMMENT '申请标题',
+    MODIFY application_status VARCHAR(32) NOT NULL DEFAULT 'SUBMITTED' COMMENT '申请状态：DRAFT 草稿，SUBMITTED 已提交，AUDITING 审核中，APPROVED 已通过，REJECTED 已驳回，WITHDRAWN 已撤回',
+    MODIFY current_node_code VARCHAR(64) NULL COMMENT '当前流程节点编码',
+    MODIFY current_node_name VARCHAR(64) NULL COMMENT '当前流程节点名称',
+    ADD COLUMN IF NOT EXISTS course_code VARCHAR(64) NULL COMMENT '目标课程代码，免考或课程顶替业务使用' AFTER current_node_name,
+    ADD COLUMN IF NOT EXISTS course_name VARCHAR(128) NULL COMMENT '目标课程名称，免考或课程顶替业务使用' AFTER course_code,
+    ADD COLUMN IF NOT EXISTS source_course_code VARCHAR(64) NULL COMMENT '来源课程代码，免考或课程顶替业务使用' AFTER course_name,
+    ADD COLUMN IF NOT EXISTS source_course_name VARCHAR(128) NULL COMMENT '来源课程名称，免考或课程顶替业务使用' AFTER source_course_code,
+    ADD COLUMN IF NOT EXISTS exemption_reason VARCHAR(512) NULL COMMENT '免考原因' AFTER source_course_name,
+    MODIFY course_code VARCHAR(64) NULL COMMENT '目标课程代码，免考或课程顶替业务使用',
+    MODIFY course_name VARCHAR(128) NULL COMMENT '目标课程名称，免考或课程顶替业务使用',
+    MODIFY source_course_code VARCHAR(64) NULL COMMENT '来源课程代码，免考或课程顶替业务使用',
+    MODIFY source_course_name VARCHAR(128) NULL COMMENT '来源课程名称，免考或课程顶替业务使用',
+    MODIFY exemption_reason VARCHAR(512) NULL COMMENT '免考原因',
+    MODIFY material_ids_json TEXT NULL COMMENT '申请材料ID列表JSON',
+    MODIFY extension_data_json TEXT NULL COMMENT '业务扩展字段快照JSON',
+    MODIFY apply_user_id BIGINT NULL COMMENT '提交人ID',
+    MODIFY apply_user_name VARCHAR(64) NULL COMMENT '提交人姓名',
+    MODIFY submit_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
+    MODIFY withdraw_time DATETIME NULL COMMENT '撤回时间',
+    MODIFY withdraw_reason VARCHAR(512) NULL COMMENT '撤回原因',
+    MODIFY audit_user_id BIGINT NULL COMMENT '审核人ID',
+    MODIFY audit_user_name VARCHAR(64) NULL COMMENT '审核人姓名',
+    MODIFY audit_time DATETIME NULL COMMENT '审核时间',
+    MODIFY audit_opinion VARCHAR(512) NULL COMMENT '审核意见',
+    MODIFY remark VARCHAR(512) NULL COMMENT '备注',
+    MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    COMMENT = '通用业务申请表';
+
+ALTER TABLE application_extension_field
+    MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    MODIFY application_id BIGINT NOT NULL COMMENT '通用申请ID，关联 business_application.id',
+    MODIFY business_type VARCHAR(64) NOT NULL COMMENT '业务类型',
+    MODIFY field_code VARCHAR(64) NOT NULL COMMENT '扩展字段编码',
+    MODIFY field_name VARCHAR(128) NOT NULL COMMENT '扩展字段名称',
+    MODIFY field_value TEXT NULL COMMENT '扩展字段值',
+    MODIFY value_type VARCHAR(32) NOT NULL DEFAULT 'STRING' COMMENT '字段值类型：STRING 字符串，NUMBER 数值，DATE 日期，JSON JSON对象',
+    MODIFY required_flag TINYINT NOT NULL DEFAULT 0 COMMENT '是否必填：1 是，0 否',
+    MODIFY sort_order INT NOT NULL DEFAULT 0 COMMENT '排序值',
+    MODIFY create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    MODIFY update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    COMMENT = '申请业务扩展字段表';

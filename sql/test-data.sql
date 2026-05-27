@@ -243,6 +243,10 @@ SELECT 'COURSE_EXEMPTION', '课程免考证明', '用于课程免考业务申请
 WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'COURSE_EXEMPTION');
 
 INSERT INTO material_type (type_code, type_name, description, sort_order, status)
+SELECT 'COURSE_REPLACEMENT', '课程顶替证明', '用于课程顶替业务申请。', 55, 'ENABLED'
+WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'COURSE_REPLACEMENT');
+
+INSERT INTO material_type (type_code, type_name, description, sort_order, status)
 SELECT 'TRANSFER', '转考申请材料', '用于考籍转入转出业务申请。', 60, 'ENABLED'
 WHERE NOT EXISTS (SELECT 1 FROM material_type WHERE type_code = 'TRANSFER');
 
@@ -262,6 +266,13 @@ SELECT @record_li, 'COURSE_EXEMPTION', '李晓雨课程免考证明.pdf', '/uplo
 WHERE NOT EXISTS (
     SELECT 1 FROM record_material
     WHERE record_id = @record_li AND material_type = 'COURSE_EXEMPTION' AND file_name = '李晓雨课程免考证明.pdf'
+);
+
+INSERT INTO record_material (record_id, material_type, file_name, file_url, audit_status)
+SELECT @record_zhang, 'COURSE_REPLACEMENT', '张明课程顶替成绩证明.pdf', '/uploads/materials/zhangming-course-replacement.pdf', 'APPROVED'
+WHERE NOT EXISTS (
+    SELECT 1 FROM record_material
+    WHERE record_id = @record_zhang AND material_type = 'COURSE_REPLACEMENT' AND file_name = '张明课程顶替成绩证明.pdf'
 );
 
 INSERT INTO record_material (record_id, material_type, file_name, file_url, audit_status)
@@ -308,30 +319,373 @@ WHERE NOT EXISTS (
     WHERE record_id = @record_chen AND change_type = 'UPDATE' AND change_reason = '更新毕业申请预审备注'
 );
 
+-- 第四阶段免考申请样例。
+INSERT INTO business_application (
+    application_no,
+    business_type,
+    record_id,
+    candidate_id,
+    application_title,
+    application_status,
+    current_node_code,
+    current_node_name,
+    material_ids_json,
+    extension_data_json,
+    apply_user_id,
+    apply_user_name,
+    remark
+)
+SELECT
+    'MK20260001',
+    'EXEMPTION',
+    @record_li,
+    @candidate_li,
+    '李晓雨免考英语（二）申请',
+    'SUBMITTED',
+    'SUBMITTED',
+    '已提交',
+    CONCAT('[', (SELECT id FROM record_material WHERE record_id = @record_li AND material_type = 'COURSE_EXEMPTION' LIMIT 1), ']'),
+    '{"courseCode":"00015","courseName":"英语（二）","sourceCourseCode":"CET4","sourceCourseName":"大学英语四级","exemptionReason":"已取得大学英语四级成绩证明，申请免考英语（二）。"}',
+    @user_record_manager,
+    '考籍管理员',
+    '测试免考申请'
+WHERE NOT EXISTS (SELECT 1 FROM business_application WHERE application_no = 'MK20260001');
+
+SET @application_exemption_li := (SELECT id FROM business_application WHERE application_no = 'MK20260001');
+
+INSERT INTO application_extension_field (
+    application_id,
+    business_type,
+    field_code,
+    field_name,
+    field_value,
+    value_type,
+    required_flag,
+    sort_order
+)
+SELECT @application_exemption_li, 'EXEMPTION', 'courseCode', '免考课程代码', '00015', 'STRING', 1, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_exemption_li AND field_code = 'courseCode'
+);
+
+INSERT INTO application_extension_field (
+    application_id,
+    business_type,
+    field_code,
+    field_name,
+    field_value,
+    value_type,
+    required_flag,
+    sort_order
+)
+SELECT @application_exemption_li, 'EXEMPTION', 'courseName', '免考课程名称', '英语（二）', 'STRING', 1, 20
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_exemption_li AND field_code = 'courseName'
+);
+
+INSERT INTO application_extension_field (
+    application_id,
+    business_type,
+    field_code,
+    field_name,
+    field_value,
+    value_type,
+    required_flag,
+    sort_order
+)
+SELECT @application_exemption_li, 'EXEMPTION', 'sourceCourseCode', '证明来源课程代码', 'CET4', 'STRING', 0, 30
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_exemption_li AND field_code = 'sourceCourseCode'
+);
+
+INSERT INTO application_extension_field (
+    application_id,
+    business_type,
+    field_code,
+    field_name,
+    field_value,
+    value_type,
+    required_flag,
+    sort_order
+)
+SELECT @application_exemption_li, 'EXEMPTION', 'sourceCourseName', '证明来源课程名称', '大学英语四级', 'STRING', 0, 40
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_exemption_li AND field_code = 'sourceCourseName'
+);
+
+INSERT INTO application_extension_field (
+    application_id,
+    business_type,
+    field_code,
+    field_name,
+    field_value,
+    value_type,
+    required_flag,
+    sort_order
+)
+SELECT @application_exemption_li, 'EXEMPTION', 'exemptionReason', '免考原因', '已取得大学英语四级成绩证明，申请免考英语（二）。', 'STRING', 1, 50
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_exemption_li AND field_code = 'exemptionReason'
+);
+
+-- 第四阶段课程顶替规则和申请样例。
+INSERT INTO course_replacement_rule (
+    source_course_code,
+    source_course_name,
+    target_course_code,
+    target_course_name,
+    major_code,
+    education_level,
+    credit,
+    rule_status,
+    effective_date,
+    expire_date,
+    remark
+)
+SELECT '03708', '中国近现代史纲要', '12656', '毛泽东思想和中国特色社会主义理论体系概论', NULL, NULL, 2.00, 'ENABLED', '2026-01-01', NULL, '公共政治课顶替规则'
+WHERE NOT EXISTS (
+    SELECT 1 FROM course_replacement_rule
+    WHERE source_course_code = '03708' AND target_course_code = '12656' AND major_code IS NULL
+);
+
+SET @rule_course_replace_public := (
+    SELECT id FROM course_replacement_rule
+    WHERE source_course_code = '03708' AND target_course_code = '12656' AND major_code IS NULL
+    LIMIT 1
+);
+
+INSERT INTO business_application (
+    application_no,
+    business_type,
+    record_id,
+    candidate_id,
+    application_title,
+    application_status,
+    current_node_code,
+    current_node_name,
+    material_ids_json,
+    extension_data_json,
+    apply_user_id,
+    apply_user_name,
+    remark
+)
+SELECT
+    'DT20260001',
+    'COURSE_REPLACE',
+    @record_zhang,
+    @candidate_zhang,
+    '中国近现代史纲要顶替毛泽东思想和中国特色社会主义理论体系概论',
+    'SUBMITTED',
+    'SUBMITTED',
+    '已提交',
+    CONCAT('[', (SELECT id FROM record_material WHERE record_id = @record_zhang AND material_type = 'COURSE_REPLACEMENT' LIMIT 1), ']'),
+    CONCAT('{"ruleId":"', @rule_course_replace_public, '","sourceCourseCode":"03708","sourceCourseName":"中国近现代史纲要","targetCourseCode":"12656","targetCourseName":"毛泽东思想和中国特色社会主义理论体系概论","majorCode":null,"educationLevel":null,"applyReason":"已完成原课程学习并取得合格成绩，申请按规则顶替。"}'),
+    @user_record_manager,
+    '考籍管理员',
+    '测试课程顶替申请'
+WHERE NOT EXISTS (SELECT 1 FROM business_application WHERE application_no = 'DT20260001');
+
+SET @application_course_replace_zhang := (SELECT id FROM business_application WHERE application_no = 'DT20260001');
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'ruleId', '课程顶替规则ID', @rule_course_replace_public, 'NUMBER', 1, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'ruleId'
+);
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'sourceCourseCode', '原课程代码', '03708', 'STRING', 1, 20
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'sourceCourseCode'
+);
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'sourceCourseName', '原课程名称', '中国近现代史纲要', 'STRING', 1, 30
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'sourceCourseName'
+);
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'targetCourseCode', '顶替课程代码', '12656', 'STRING', 1, 40
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'targetCourseCode'
+);
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'targetCourseName', '顶替课程名称', '毛泽东思想和中国特色社会主义理论体系概论', 'STRING', 1, 50
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'targetCourseName'
+);
+
+INSERT INTO application_extension_field (application_id, business_type, field_code, field_name, field_value, value_type, required_flag, sort_order)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', 'applyReason', '申请原因', '已完成原课程学习并取得合格成绩，申请按规则顶替。', 'STRING', 0, 60
+WHERE NOT EXISTS (
+    SELECT 1 FROM application_extension_field
+    WHERE application_id = @application_course_replace_zhang AND field_code = 'applyReason'
+);
+
+-- 第四阶段流程状态基础数据：各业务先复用一致的提交、审核、终态流转。
+INSERT INTO process_status (
+    business_type,
+    status_code,
+    status_name,
+    status_sort,
+    initial_status,
+    final_status,
+    allow_edit,
+    allow_withdraw,
+    next_status_codes,
+    description
+)
+SELECT b.business_type,
+       s.status_code,
+       s.status_name,
+       s.status_sort,
+       s.initial_status,
+       s.final_status,
+       s.allow_edit,
+       s.allow_withdraw,
+       s.next_status_codes,
+       s.description
+FROM (
+    SELECT 'EXEMPTION' AS business_type
+    UNION ALL SELECT 'COURSE_REPLACE'
+    UNION ALL SELECT 'TRANSFER_IN'
+    UNION ALL SELECT 'TRANSFER_OUT'
+    UNION ALL SELECT 'GRADUATION'
+) b
+JOIN (
+    SELECT 'SUBMITTED' AS status_code, '已提交' AS status_name, 10 AS status_sort, 1 AS initial_status, 0 AS final_status, 1 AS allow_edit, 1 AS allow_withdraw, 'AUDITING,APPROVED,REJECTED,WITHDRAWN' AS next_status_codes, '申请提交后进入待审核状态。' AS description
+    UNION ALL SELECT 'AUDITING', '审核中', 20, 0, 0, 0, 0, 'APPROVED,REJECTED', '审核人员已受理申请，正在进行材料和资格复核。'
+    UNION ALL SELECT 'APPROVED', '审核通过', 30, 0, 1, 0, 0, NULL, '申请审核通过，后续可联动档案状态或业务结果。'
+    UNION ALL SELECT 'REJECTED', '审核驳回', 40, 0, 1, 0, 0, NULL, '申请审核驳回，需要查看审核意见。'
+    UNION ALL SELECT 'WITHDRAWN', '已撤回', 50, 0, 1, 0, 0, NULL, '申请人在允许撤回阶段主动撤回申请。'
+) s
+WHERE NOT EXISTS (
+    SELECT 1 FROM process_status ps
+    WHERE ps.business_type = b.business_type AND ps.status_code = s.status_code
+);
+
 -- 测试审核记录。
-INSERT INTO audit_record (business_type, business_id, audit_status, audit_opinion, auditor_id)
-SELECT 'MATERIAL', @record_zhang, 'APPROVED', '身份信息清晰，材料有效。', 1001
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT NULL, 'MATERIAL', @record_zhang, @record_zhang, 'APPROVE', 'PENDING', 'APPROVED', 'APPROVED', '身份信息清晰，材料有效。', @user_auditor, '业务审核员'
 WHERE NOT EXISTS (
     SELECT 1 FROM audit_record
     WHERE business_type = 'MATERIAL' AND business_id = @record_zhang AND audit_status = 'APPROVED'
 );
 
-INSERT INTO audit_record (business_type, business_id, audit_status, audit_opinion, auditor_id)
-SELECT 'COURSE_EXEMPTION', @record_li, 'PENDING', '等待人工复核课程成绩证明。', 1002
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT NULL, 'COURSE_EXEMPTION', @record_li, @record_li, 'SUBMIT', NULL, 'PENDING', 'PENDING', '等待人工复核课程成绩证明。', @user_auditor, '业务审核员'
 WHERE NOT EXISTS (
     SELECT 1 FROM audit_record
     WHERE business_type = 'COURSE_EXEMPTION' AND business_id = @record_li AND audit_status = 'PENDING'
 );
 
-INSERT INTO audit_record (business_type, business_id, audit_status, audit_opinion, auditor_id)
-SELECT 'TRANSFER', @record_wang, 'REJECTED', '申请表缺少原考籍地盖章。', 1003
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT @application_exemption_li, 'EXEMPTION', @application_exemption_li, @record_li, 'SUBMIT', NULL, 'SUBMITTED', 'SUBMITTED', '免考申请已提交，等待审核。', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM audit_record
+    WHERE business_type = 'EXEMPTION' AND business_id = @application_exemption_li AND audit_status = 'SUBMITTED'
+);
+
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT @application_course_replace_zhang, 'COURSE_REPLACE', @application_course_replace_zhang, @record_zhang, 'SUBMIT', NULL, 'SUBMITTED', 'SUBMITTED', '课程顶替申请已提交，等待审核。', @user_record_manager, '考籍管理员'
+WHERE NOT EXISTS (
+    SELECT 1 FROM audit_record
+    WHERE business_type = 'COURSE_REPLACE' AND business_id = @application_course_replace_zhang AND audit_status = 'SUBMITTED'
+);
+
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT NULL, 'TRANSFER', @record_wang, @record_wang, 'REJECT', 'AUDITING', 'REJECTED', 'REJECTED', '申请表缺少原考籍地盖章。', @user_auditor, '业务审核员'
 WHERE NOT EXISTS (
     SELECT 1 FROM audit_record
     WHERE business_type = 'TRANSFER' AND business_id = @record_wang AND audit_status = 'REJECTED'
 );
 
-INSERT INTO audit_record (business_type, business_id, audit_status, audit_opinion, auditor_id)
-SELECT 'GRADUATION', @record_chen, 'APPROVED', '毕业申请材料完整，准予进入下一流程。', 1001
+INSERT INTO audit_record (
+    application_id,
+    business_type,
+    business_id,
+    record_id,
+    audit_action,
+    before_status,
+    after_status,
+    audit_status,
+    audit_opinion,
+    auditor_id,
+    auditor_name
+)
+SELECT NULL, 'GRADUATION', @record_chen, @record_chen, 'APPROVE', 'AUDITING', 'APPROVED', 'APPROVED', '毕业申请材料完整，准予进入下一流程。', @user_auditor, '业务审核员'
 WHERE NOT EXISTS (
     SELECT 1 FROM audit_record
     WHERE business_type = 'GRADUATION' AND business_id = @record_chen AND audit_status = 'APPROVED'
