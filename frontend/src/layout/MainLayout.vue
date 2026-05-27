@@ -5,7 +5,14 @@
       <el-menu router :default-active="$route.path" background-color="#162033" text-color="#dbe4f0" active-text-color="#ffffff">
         <el-menu-item index="/dashboard"><el-icon><DataBoard /></el-icon><span>工作台</span></el-menu-item>
         <el-menu-item index="/candidates"><el-icon><User /></el-icon><span>考生管理</span></el-menu-item>
-        <el-menu-item index="/records"><el-icon><Files /></el-icon><span>考籍档案</span></el-menu-item>
+        <el-sub-menu index="/record-manage">
+          <template #title>
+            <el-icon><Files /></el-icon>
+            <span>考籍业务</span>
+          </template>
+          <el-menu-item index="/records"><span>考籍档案</span></el-menu-item>
+          <el-menu-item index="/records/change-logs"><span>变更记录</span></el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/materials"><el-icon><Picture /></el-icon><span>材料审核</span></el-menu-item>
         <el-menu-item index="/exemptions"><el-icon><CircleCheck /></el-icon><span>免考管理</span></el-menu-item>
         <el-menu-item index="/courses"><el-icon><Switch /></el-icon><span>课程顶替</span></el-menu-item>

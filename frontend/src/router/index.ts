@@ -12,6 +12,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'dashboard', component: () => import('../views/dashboard/DashboardView.vue'), meta: { title: '工作台' } },
       { path: 'candidates', component: () => import('../views/candidate/CandidateListView.vue'), meta: { title: '考生管理' } },
       { path: 'records', component: () => import('../views/record/RecordListView.vue'), meta: { title: '考籍档案' } },
+      { path: 'records/change-logs', component: () => import('../views/record/RecordChangeLogView.vue'), meta: { title: '档案变更记录' } },
       { path: 'materials', component: () => import('../views/material/MaterialAuditView.vue'), meta: { title: '材料审核' } },
       { path: 'exemptions', component: () => import('../views/exemption/ExemptionView.vue'), meta: { title: '免考管理' } },
       { path: 'courses', component: () => import('../views/course/CourseReplaceView.vue'), meta: { title: '课程顶替' } },
