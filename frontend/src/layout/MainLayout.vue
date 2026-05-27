@@ -18,7 +18,7 @@
     <el-container>
       <el-header class="header">
         <strong>{{ $route.meta.title }}</strong>
-        <el-button type="primary" plain @click="$router.push('/login')">退出</el-button>
+        <el-button type="primary" plain @click="handleLogout">退出</el-button>
       </el-header>
       <el-main>
         <router-view />
@@ -29,6 +29,18 @@
 
 <script setup lang="ts">
 import { CircleCheck, DataBoard, Files, Medal, Picture, Service, Setting, Sort, Switch, User } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { clearLoginResult } from '../utils/authToken'
+
+const router = useRouter()
+
+/**
+ * @brief 清理本地登录状态并返回登录页。
+ */
+function handleLogout() {
+  clearLoginResult()
+  router.replace('/login')
+}
 </script>
 
 <style scoped>
@@ -58,4 +70,3 @@ import { CircleCheck, DataBoard, Files, Medal, Picture, Service, Setting, Sort, 
   border-bottom: 1px solid #e5e7eb;
 }
 </style>
-

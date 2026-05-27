@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue'
+import { getToken } from '../utils/authToken'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('../views/login/LoginView.vue') },
@@ -22,8 +23,25 @@ const routes: RouteRecordRaw[] = [
   }
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes
 })
+
+router.beforeEach((to) => {
+  if (to.path === '/login') {
+    return true
+  }
+
+  if (!getToken()) {
+    return {
+      path: '/login',
+      query: { redirect: to.fullPath }
+    }
+  }
+
+  return true
+})
+
+export default router
 
