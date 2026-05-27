@@ -10,14 +10,17 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
     private final AuthInterceptor authInterceptor;
+    private final OperationLogInterceptor operationLogInterceptor;
 
     /**
      * @brief 构造 Web MVC 配置。
      *
      * @param authInterceptor Token 认证拦截器。
+     * @param operationLogInterceptor 操作日志拦截器。
      */
-    public WebConfig(AuthInterceptor authInterceptor) {
+    public WebConfig(AuthInterceptor authInterceptor, OperationLogInterceptor operationLogInterceptor) {
         this.authInterceptor = authInterceptor;
+        this.operationLogInterceptor = operationLogInterceptor;
     }
 
     /**
@@ -46,6 +49,19 @@ public class WebConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/auth/login",
                         "/api/health",
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
+                        "/doc.html",
+                        "/webjars/**",
+                        "/favicon.ico"
+                );
+        registry.addInterceptor(operationLogInterceptor)
+                .addPathPatterns("/api/**")
+                .excludePathPatterns(
+                        "/api/auth/login",
+                        "/api/health",
+                        "/api/system/logs/**",
                         "/v3/api-docs/**",
                         "/swagger-ui/**",
                         "/swagger-ui.html",
