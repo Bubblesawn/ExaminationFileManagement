@@ -284,7 +284,7 @@ export function auditApplicationMaterialsByApplicationId(applicationId: number) 
  * @return 后端封装后的材料格式校验、清晰度检测和基础分类结果。
  */
 export function preprocessMaterial(payload: MaterialPreprocessRequest) {
-  return http.post<unknown, ApiResult<AlgorithmResponse<MaterialPreprocessData>>>('/ai/material-preprocess', payload)
+  return http.post<unknown, AlgorithmResponse<MaterialPreprocessData>>('/ai/material-preprocess', payload)
 }
 
 /**

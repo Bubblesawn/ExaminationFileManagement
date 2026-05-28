@@ -465,12 +465,12 @@ async function submitAudit() {
         })
       )
     )
-    const preprocessFailure = preprocessResponses.find((item) => item.code !== 200 || item.data.code !== 200)
+    const preprocessFailure = preprocessResponses.find((item) => item.code !== 200 || !item.data)
     if (preprocessFailure) {
-      ElMessage.error(preprocessFailure.data?.message || preprocessFailure.message || '材料预处理失败')
+      ElMessage.error(preprocessFailure.message || '材料预处理失败')
       return
     }
-    preprocessResults.value = preprocessResponses.map((item) => item.data.data)
+    preprocessResults.value = preprocessResponses.map((item) => item.data)
 
     const response = await auditApplicationMaterials({
       businessId: form.businessId,
