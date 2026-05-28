@@ -25,6 +25,7 @@ http.interceptors.response.use(
   (response) => {
     const result = response.data as ApiResult<unknown>
     if (typeof result?.code === 'number' && result.code !== 200) {
+      ElMessage.error(result.message || '请求处理失败')
       return Promise.reject(new Error(result.message || '请求处理失败'))
     }
     return result?.data ?? response.data

@@ -526,6 +526,118 @@ ALTER TABLE record_change_log
     MODIFY operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
     COMMENT = '档案变更记录表';
 
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'application_id'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN application_id BIGINT NULL COMMENT ''通用申请ID，关联 business_application.id'' AFTER id',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'record_id'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN record_id BIGINT NULL COMMENT ''考籍档案ID'' AFTER business_id',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'audit_action'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN audit_action VARCHAR(32) NOT NULL DEFAULT ''SUBMIT'' COMMENT ''流程动作：SUBMIT 提交，APPROVE 通过，REJECT 驳回，WITHDRAW 撤回'' AFTER record_id',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'before_status'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN before_status VARCHAR(32) NULL COMMENT ''操作前申请状态'' AFTER audit_action',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'after_status'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN after_status VARCHAR(32) NOT NULL DEFAULT ''SUBMITTED'' COMMENT ''操作后申请状态'' AFTER before_status',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'auditor_name'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN auditor_name VARCHAR(64) NULL COMMENT ''审核人或操作人姓名'' AFTER auditor_id',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'audit_record'
+      AND COLUMN_NAME = 'operation_time'
+);
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE audit_record ADD COLUMN operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT ''操作时间'' AFTER auditor_name',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 ALTER TABLE audit_record
     MODIFY id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
     MODIFY application_id BIGINT NULL COMMENT '通用申请ID，关联 business_application.id',

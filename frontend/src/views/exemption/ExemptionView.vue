@@ -340,6 +340,7 @@ function openCreateDrawer() {
   })
   materialIdsText.value = ''
   formDrawerVisible.value = true
+  formRef.value?.clearValidate()
 }
 
 async function openEditDrawer(row: ExemptionApplication) {
@@ -357,6 +358,7 @@ async function openEditDrawer(row: ExemptionApplication) {
   })
   materialIdsText.value = (selectedApplication.value.materialIds || []).join(',')
   formDrawerVisible.value = true
+  formRef.value?.clearValidate()
 }
 
 async function openDetailDrawer(row: ExemptionApplication) {
@@ -379,7 +381,16 @@ function openWithdrawDialog(row: ExemptionApplication) {
 }
 
 async function submitForm() {
-  await formRef.value?.validate()
+  if (saving.value) return
+  if (!formRef.value) {
+    ElMessage.error('表单未初始化，请关闭后重新打开')
+    return
+  }
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) {
+    ElMessage.warning('请先完善必填信息')
+    return
+  }
   saving.value = true
   try {
     const payload = {
