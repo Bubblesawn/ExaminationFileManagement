@@ -30,7 +30,15 @@
     <!-- 2. 重构的渐变核心数据统计卡片 -->
     <el-row v-loading="loading" :gutter="16" class="stat-row">
       <el-col v-for="item in stats" :key="item.label" :xs="24" :sm="12" :md="6" class="stat-col">
-        <div class="glass-card stat-card" :style="{ '--theme-color': item.color }">
+        <div
+          class="glass-card stat-card"
+          :style="{ '--theme-color': item.color }"
+          role="button"
+          tabindex="0"
+          @click="navigateTo(item.route)"
+          @keydown.enter="navigateTo(item.route)"
+          @keydown.space.prevent="navigateTo(item.route)"
+        >
           <div class="stat-card-left">
             <div class="stat-icon-wrapper" :style="{ background: item.bgGradient }">
               <el-icon class="stat-icon"><component :is="Icons[item.icon]" /></el-icon>
@@ -243,6 +251,7 @@ const stats = computed(() => [
     bgGradient: 'linear-gradient(135deg, #60a5fa 0%, #2563eb 100%)',
     trend: '+2.5%',
     desc: '系统内总有效考籍卷宗',
+    route: '/records',
     permission: 'record:view'
   },
   {
@@ -253,6 +262,7 @@ const stats = computed(() => [
     bgGradient: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
     trend: '紧急',
     desc: '需人工或智能辅助预审',
+    route: '/materials',
     permission: 'material:audit:view'
   },
   {
@@ -263,6 +273,7 @@ const stats = computed(() => [
     bgGradient: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
     trend: '',
     desc: '本审查周期内待结清申请',
+    route: '/exemptions',
     permission: 'exemption:view'
   },
   {
@@ -273,6 +284,7 @@ const stats = computed(() => [
     bgGradient: 'linear-gradient(135deg, #34d399 0%, #059669 100%)',
     trend: '+12%',
     desc: '当期符合预审查资格库',
+    route: '/graduations',
     permission: 'graduation:view'
   }
 ].filter((item) => can(item.permission)))
@@ -662,11 +674,18 @@ onUnmounted(() => {
   align-items: center;
   gap: 16px;
   min-height: 108px;
+  cursor: pointer;
+  outline: none;
 }
 
 .stat-card:hover {
   transform: translateY(-5px);
   box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.08);
+}
+
+.stat-card:focus-visible {
+  border-color: var(--theme-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-color) 18%, transparent);
 }
 
 .stat-card:hover .card-accent-border {

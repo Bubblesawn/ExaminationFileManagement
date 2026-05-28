@@ -40,6 +40,37 @@ def test_chat_returns_unified_response() -> None:
     assert isinstance(body["data"]["suggestions"], list)
 
 
+def test_chat_keeps_low_confidence_deepseek_answer(monkeypatch) -> None:
+    """@brief DeepSeek 返回低置信度回答时仍展示模型回答，并标记人工复核。"""
+
+    def fake_answer_with_deepseek(question, scene, references, matched_intent):
+        return {
+            "intent_code": "GENERAL_CONSULT",
+            "intent_name": "通用考籍咨询",
+            "answer": "问题内容不够明确，请补充具体办理事项或材料类型后再咨询。",
+            "confidence": 0.1,
+            "suggestions": ["补充具体问题"],
+            "need_manual_review": True,
+        }
+
+    monkeypatch.setattr(
+        "app.services.mock_algorithm_service.answer_with_deepseek",
+        fake_answer_with_deepseek,
+    )
+    response = client.post(
+        "/api/chat",
+        headers=headers,
+        json={"content": "？？？", "scene": "MATERIAL_AUDIT"},
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["code"] == 200
+    assert body["data"]["answer"] == "问题内容不够明确，请补充具体办理事项或材料类型后再咨询。"
+    assert body["data"]["confidence"] == 0.1
+    assert body["data"]["need_manual_review"] is True
+
+
 def test_material_preprocess_rejects_negative_file_size() -> None:
     """@brief 材料预处理接口对负数文件大小返回参数校验错误。"""
     response = client.post(

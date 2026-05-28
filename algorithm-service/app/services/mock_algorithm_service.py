@@ -1159,19 +1159,20 @@ def answer_question(request: ChatRequest) -> dict:
     matched_intent = {"intent_code": rule["intent_code"], "intent_name": rule["intent_name"]}
     deepseek_answer = answer_with_deepseek(request.content, request.scene, local_references, matched_intent)
     if _is_deepseek_answer_usable(deepseek_answer):
+        deepseek_confidence = _read_deepseek_confidence(deepseek_answer, confidence)
         result = ChatAnswerResult(
             business_id=request.business_id,
             question=request.content,
             scene=request.scene,
             intent_code=_normalize_deepseek_intent_code(deepseek_answer.get("intent_code"), rule["intent_code"]),
             intent_name=deepseek_answer.get("intent_name") or rule["intent_name"],
-            answer=deepseek_answer.get("answer") or rule["answer"],
-            confidence=max(confidence, deepseek_answer.get("confidence", confidence)),
+            answer=deepseek_answer["answer"],
+            confidence=deepseek_confidence,
             references=_build_chat_references(rule),
             suggestions=deepseek_answer.get("suggestions") or rule["suggestions"],
             need_manual_review=deepseek_answer.get(
                 "need_manual_review",
-                deepseek_answer.get("confidence", confidence) < MIN_REVIEW_CONFIDENCE,
+                deepseek_confidence < MIN_REVIEW_CONFIDENCE,
             ),
         )
         return _success(result.model_dump())
@@ -1200,7 +1201,21 @@ def _is_deepseek_answer_usable(payload: dict | None) -> bool:
         return False
     if not payload.get("answer"):
         return False
-    return float(payload.get("confidence", 0)) >= MIN_REVIEW_CONFIDENCE
+    return True
+
+
+def _read_deepseek_confidence(payload: dict, fallback_confidence: float) -> float:
+    """@brief 读取 DeepSeek 返回的问答置信度。
+
+    @param payload DeepSeek 返回的结构化问答结果。
+    @param fallback_confidence 本地规则匹配置信度。
+    @return 归一化到 0 到 1 区间的置信度。
+    """
+    try:
+        confidence = float(payload.get("confidence", fallback_confidence))
+    except (TypeError, ValueError):
+        confidence = fallback_confidence
+    return max(0.0, min(1.0, confidence))
 
 
 def recognize_speech(request: SpeechRequest) -> dict:
