@@ -12,15 +12,13 @@ import com.exam.record.entity.AuditRecord;
 import com.exam.record.entity.BusinessApplication;
 import com.exam.record.entity.Candidate;
 import com.exam.record.entity.RecordMaterial;
-import com.exam.record.entity.RecordStatusLog;
 import com.exam.record.entity.StudentRecord;
 import com.exam.record.mapper.AuditRecordMapper;
 import com.exam.record.mapper.BusinessApplicationMapper;
 import com.exam.record.mapper.CandidateMapper;
 import com.exam.record.mapper.RecordMaterialMapper;
-import com.exam.record.mapper.RecordStatusLogMapper;
 import com.exam.record.mapper.StudentRecordMapper;
-import com.exam.record.service.RecordChangeLogService;
+import com.exam.record.service.RecordStatusLinkageService;
 import com.exam.record.service.TransferApplicationService;
 import com.exam.record.util.AuthContextHolder;
 import com.exam.record.vo.AuditRecordVO;
@@ -71,7 +69,6 @@ public class TransferApplicationServiceImpl extends ServiceImpl<BusinessApplicat
     private static final String ACTION_REJECT = "REJECT";
     private static final String ACTION_WITHDRAW = "WITHDRAW";
     private static final String RECORD_STATUS_TRANSFERRED_OUT = "TRANSFERRED_OUT";
-    private static final String CHANGE_TYPE_STATUS_CHANGE = "STATUS_CHANGE";
     private static final DateTimeFormatter APPLICATION_NO_DATE_FORMATTER = DateTimeFormatter.BASIC_ISO_DATE;
     private static final TypeReference<List<Long>> MATERIAL_ID_LIST_TYPE = new TypeReference<>() {
     };
@@ -82,8 +79,7 @@ public class TransferApplicationServiceImpl extends ServiceImpl<BusinessApplicat
     private final CandidateMapper candidateMapper;
     private final RecordMaterialMapper recordMaterialMapper;
     private final AuditRecordMapper auditRecordMapper;
-    private final RecordStatusLogMapper recordStatusLogMapper;
-    private final RecordChangeLogService recordChangeLogService;
+    private final RecordStatusLinkageService recordStatusLinkageService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -93,23 +89,20 @@ public class TransferApplicationServiceImpl extends ServiceImpl<BusinessApplicat
      * @param candidateMapper 考生信息 Mapper。
      * @param recordMaterialMapper 档案材料 Mapper。
      * @param auditRecordMapper 审核记录 Mapper。
-     * @param recordStatusLogMapper 档案状态记录 Mapper。
-     * @param recordChangeLogService 档案变更记录业务服务。
+     * @param recordStatusLinkageService 档案状态联动服务。
      * @param objectMapper JSON 序列化组件。
      */
     public TransferApplicationServiceImpl(StudentRecordMapper studentRecordMapper,
                                           CandidateMapper candidateMapper,
                                           RecordMaterialMapper recordMaterialMapper,
                                           AuditRecordMapper auditRecordMapper,
-                                          RecordStatusLogMapper recordStatusLogMapper,
-                                          RecordChangeLogService recordChangeLogService,
+                                          RecordStatusLinkageService recordStatusLinkageService,
                                           ObjectMapper objectMapper) {
         this.studentRecordMapper = studentRecordMapper;
         this.candidateMapper = candidateMapper;
         this.recordMaterialMapper = recordMaterialMapper;
         this.auditRecordMapper = auditRecordMapper;
-        this.recordStatusLogMapper = recordStatusLogMapper;
-        this.recordChangeLogService = recordChangeLogService;
+        this.recordStatusLinkageService = recordStatusLinkageService;
         this.objectMapper = objectMapper;
     }
 
@@ -332,7 +325,12 @@ public class TransferApplicationServiceImpl extends ServiceImpl<BusinessApplicat
         application.setAuditOpinion(dto.getAuditOpinion());
         updateById(application);
         if (STATUS_APPROVED.equals(targetStatus) && BUSINESS_TYPE_TRANSFER_OUT.equals(application.getBusinessType())) {
-            markRecordTransferredOut(application.getRecordId(), dto.getAuditOpinion());
+            recordStatusLinkageService.linkRecordStatus(
+                    application.getRecordId(),
+                    RECORD_STATUS_TRANSFERRED_OUT,
+                    dto.getAuditOpinion(),
+                    application.getBusinessType(),
+                    application.getId());
         }
         saveFlowRecord(application,
                 STATUS_APPROVED.equals(targetStatus) ? ACTION_APPROVE : ACTION_REJECT,
@@ -632,33 +630,6 @@ public class TransferApplicationServiceImpl extends ServiceImpl<BusinessApplicat
         } catch (JsonProcessingException exception) {
             return Collections.emptyMap();
         }
-    }
-
-    private void markRecordTransferredOut(Long recordId, String changeReason) {
-        StudentRecord record = getExistingRecord(recordId);
-        String beforeStatus = record.getRecordStatus();
-        if (RECORD_STATUS_TRANSFERRED_OUT.equals(beforeStatus)) {
-            return;
-        }
-        record.setRecordStatus(RECORD_STATUS_TRANSFERRED_OUT);
-        studentRecordMapper.updateById(record);
-        TokenUserVO user = AuthContextHolder.getUser();
-        RecordStatusLog statusLog = new RecordStatusLog();
-        statusLog.setRecordId(recordId);
-        statusLog.setBeforeStatus(beforeStatus);
-        statusLog.setAfterStatus(RECORD_STATUS_TRANSFERRED_OUT);
-        statusLog.setChangeReason(changeReason);
-        statusLog.setOperatorId(user == null ? null : user.getId());
-        statusLog.setOperatorName(user == null ? null : user.getRealName());
-        statusLog.setOperationTime(LocalDateTime.now());
-        recordStatusLogMapper.insert(statusLog);
-        recordChangeLogService.recordChange(
-                recordId,
-                CHANGE_TYPE_STATUS_CHANGE,
-                "recordStatus",
-                beforeStatus,
-                RECORD_STATUS_TRANSFERRED_OUT,
-                changeReason);
     }
 
     private void saveFlowRecord(BusinessApplication application,

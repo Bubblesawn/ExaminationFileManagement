@@ -49,6 +49,7 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
     private static final String STATUS_NORMAL = "NORMAL";
     private static final String STATUS_SUSPENDED = "SUSPENDED";
     private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String STATUS_TRANSFERRED_OUT = "TRANSFERRED_OUT";
     private static final String STATUS_GRADUATED = "GRADUATED";
     private static final String ARCHIVE_STATUS_UNARCHIVED = "UNARCHIVED";
     private static final String ARCHIVE_STATUS_ARCHIVED = "ARCHIVED";
@@ -189,7 +190,7 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
      * @brief 更新考籍档案状态。
      *
      * @details
-     * 仅允许流转到 NORMAL、SUSPENDED、CANCELLED、GRADUATED 四种业务状态。
+     * 仅允许流转到 NORMAL、SUSPENDED、CANCELLED、TRANSFERRED_OUT、GRADUATED 五种业务状态。
      * 状态未发生变化时直接返回详情，不额外写入状态记录。
      *
      * @param id 档案ID。
@@ -345,8 +346,9 @@ public class StudentRecordServiceImpl extends ServiceImpl<StudentRecordMapper, S
         if (!STATUS_NORMAL.equals(status)
                 && !STATUS_SUSPENDED.equals(status)
                 && !STATUS_CANCELLED.equals(status)
+                && !STATUS_TRANSFERRED_OUT.equals(status)
                 && !STATUS_GRADUATED.equals(status)) {
-            throw new BusinessException(400, "考籍状态只能为NORMAL、SUSPENDED、CANCELLED或GRADUATED");
+            throw new BusinessException(400, "考籍状态只能为NORMAL、SUSPENDED、CANCELLED、TRANSFERRED_OUT或GRADUATED");
         }
     }
 
