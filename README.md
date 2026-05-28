@@ -42,7 +42,7 @@ npm run dev
 ### 算法服务
 
 ```bash
-cd D:\idea\IDEAProject\ExaminationFileManagement\algorithm-service
+cd algorithm-service
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
