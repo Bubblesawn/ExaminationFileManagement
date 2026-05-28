@@ -8,6 +8,7 @@ import com.exam.record.entity.SysUser;
 import com.exam.record.mapper.SysLoginLogMapper;
 import com.exam.record.mapper.SysUserMapper;
 import com.exam.record.service.AuthService;
+import com.exam.record.service.UserPermissionService;
 import com.exam.record.util.AuthTokenUtil;
 import com.exam.record.util.ClientIpUtil;
 import com.exam.record.util.PasswordUtil;
@@ -34,6 +35,7 @@ public class AuthServiceImpl implements AuthService {
     private final SysUserMapper sysUserMapper;
     private final SysLoginLogMapper sysLoginLogMapper;
     private final AuthTokenUtil authTokenUtil;
+    private final UserPermissionService userPermissionService;
     private final Set<String> invalidTokens = ConcurrentHashMap.newKeySet();
 
     /**
@@ -42,13 +44,16 @@ public class AuthServiceImpl implements AuthService {
      * @param sysUserMapper 系统用户 Mapper。
      * @param sysLoginLogMapper 登录日志 Mapper。
      * @param authTokenUtil Token 工具。
+     * @param userPermissionService 用户权限查询服务。
      */
     public AuthServiceImpl(SysUserMapper sysUserMapper,
                            SysLoginLogMapper sysLoginLogMapper,
-                           AuthTokenUtil authTokenUtil) {
+                           AuthTokenUtil authTokenUtil,
+                           UserPermissionService userPermissionService) {
         this.sysUserMapper = sysUserMapper;
         this.sysLoginLogMapper = sysLoginLogMapper;
         this.authTokenUtil = authTokenUtil;
+        this.userPermissionService = userPermissionService;
     }
 
     /**
@@ -85,7 +90,13 @@ public class AuthServiceImpl implements AuthService {
         recordLoginLog(dto.getUsername(), user.getId(), LOGIN_SUCCESS, null, request);
 
         String token = authTokenUtil.generateToken(user);
-        LoginUserVO loginUser = new LoginUserVO(user.getId(), user.getUsername(), user.getRealName(), user.getAvatar());
+        LoginUserVO loginUser = new LoginUserVO(
+                user.getId(),
+                user.getUsername(),
+                user.getRealName(),
+                user.getAvatar(),
+                userPermissionService.listRoleCodes(user.getId()),
+                userPermissionService.listPermissions(user.getId()).stream().toList());
         return new LoginVO(token, "Bearer", authTokenUtil.getExpireSeconds(), loginUser);
     }
 

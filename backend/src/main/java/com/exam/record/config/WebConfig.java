@@ -14,6 +14,7 @@ import java.nio.file.Path;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
     private final AuthInterceptor authInterceptor;
+    private final PermissionInterceptor permissionInterceptor;
     private final OperationLogInterceptor operationLogInterceptor;
     private final Path materialUploadPath;
 
@@ -21,13 +22,16 @@ public class WebConfig implements WebMvcConfigurer {
      * @brief 构造 Web MVC 配置。
      *
      * @param authInterceptor Token 认证拦截器。
+     * @param permissionInterceptor 接口权限拦截器。
      * @param operationLogInterceptor 操作日志拦截器。
      */
     public WebConfig(
             AuthInterceptor authInterceptor,
+            PermissionInterceptor permissionInterceptor,
             OperationLogInterceptor operationLogInterceptor,
             @Value("${material.upload.root:uploads/materials}") String materialUploadRoot) {
         this.authInterceptor = authInterceptor;
+        this.permissionInterceptor = permissionInterceptor;
         this.operationLogInterceptor = operationLogInterceptor;
         this.materialUploadPath = Path.of(materialUploadRoot).toAbsolutePath().normalize();
     }
@@ -68,6 +72,20 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
                         "/api/auth/login",
+                        "/api/health",
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
+                        "/doc.html",
+                        "/webjars/**",
+                        "/favicon.ico"
+                );
+        registry.addInterceptor(permissionInterceptor)
+                .addPathPatterns("/api/**")
+                .excludePathPatterns(
+                        "/api/auth/login",
+                        "/api/auth/logout",
+                        "/api/auth/me",
                         "/api/health",
                         "/v3/api-docs/**",
                         "/swagger-ui/**",

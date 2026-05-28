@@ -10,6 +10,8 @@ export interface LoginUser {
   username: string
   realName: string
   avatar: string | null
+  roleCodes: string[]
+  permissions: string[]
 }
 
 export interface LoginResponse {

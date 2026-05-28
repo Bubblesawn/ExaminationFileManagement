@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * @brief 登录用户基础信息。
  */
@@ -15,4 +17,6 @@ public class LoginUserVO {
     private String username;
     private String realName;
     private String avatar;
+    private List<String> roleCodes;
+    private List<String> permissions;
 }

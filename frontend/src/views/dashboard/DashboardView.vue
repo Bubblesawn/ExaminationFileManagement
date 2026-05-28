@@ -10,10 +10,10 @@
             今天系统平稳运行，有 <strong class="badge-count">{{ dashboardStats.pendingMaterialCount }}</strong> 项待审核材料需要您的处理。请及时跟进业务流转。
           </p>
           <div class="welcome-actions">
-            <el-button type="warning" size="default" :icon="Icons.Service" @click="navigateTo('/ai')">
+            <el-button v-if="can('ai:view')" type="warning" size="default" :icon="Icons.Service" @click="navigateTo('/ai')">
               智能AI核验辅助
             </el-button>
-            <el-button type="primary" plain size="default" :icon="Icons.Files" @click="navigateTo('/records')">
+            <el-button v-if="can('record:view')" type="primary" plain size="default" :icon="Icons.Files" @click="navigateTo('/records')">
               考籍档案浏览
             </el-button>
           </div>
@@ -138,7 +138,7 @@
         </section>
 
         <!-- 6. 系统最新动态时间线 -->
-        <section class="glass-card business-panel timeline-panel">
+        <section v-if="can('system:log:view')" class="glass-card business-panel timeline-panel">
           <div class="panel-header">
             <h3 class="panel-title"><el-icon><Memo /></el-icon> 系统最新操作动态</h3>
             <el-button type="primary" link size="small" @click="navigateTo('/system/logs')">
@@ -178,6 +178,9 @@ import { ElMessage } from 'element-plus'
 import * as Icons from '@element-plus/icons-vue'
 import { getDashboardStats, type DashboardStats } from '../../api/dashboard'
 import { pageOperationLogs, type OperationLogRecord } from '../../api/systemLog'
+import { hasPermission } from '../../utils/authToken'
+
+type IconName = keyof typeof Icons
 
 const router = useRouter()
 
@@ -220,97 +223,117 @@ function navigateTo(path: string) {
   router.push(path)
 }
 
+/**
+ * @brief 判断当前用户是否拥有指定菜单权限。
+ *
+ * @param permission 菜单权限码。
+ * @return 是否拥有该权限。
+ */
+function can(permission: string) {
+  return hasPermission(permission)
+}
+
 // 核心统计指标配置，配备富美学配色与图标
 const stats = computed(() => [
   {
     label: '考籍档案',
     value: dashboardStats.value.recordCount,
-    icon: 'Files',
+    icon: 'Files' as IconName,
     color: '#3b82f6',
     bgGradient: 'linear-gradient(135deg, #60a5fa 0%, #2563eb 100%)',
     trend: '+2.5%',
-    desc: '系统内总有效考籍卷宗'
+    desc: '系统内总有效考籍卷宗',
+    permission: 'record:view'
   },
   {
     label: '待审材料',
     value: dashboardStats.value.pendingMaterialCount,
-    icon: 'Picture',
+    icon: 'Picture' as IconName,
     color: '#f59e0b',
     bgGradient: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
     trend: '紧急',
-    desc: '需人工或智能辅助预审'
+    desc: '需人工或智能辅助预审',
+    permission: 'material:audit:view'
   },
   {
     label: '免考申请',
     value: dashboardStats.value.exemptionApplicationCount,
-    icon: 'CircleCheck',
+    icon: 'CircleCheck' as IconName,
     color: '#a855f7',
     bgGradient: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
     trend: '',
-    desc: '本审查周期内待结清申请'
+    desc: '本审查周期内待结清申请',
+    permission: 'exemption:view'
   },
   {
     label: '毕业申请',
     value: dashboardStats.value.graduationApplicationCount,
-    icon: 'Medal',
+    icon: 'Medal' as IconName,
     color: '#10b981',
     bgGradient: 'linear-gradient(135deg, #34d399 0%, #059669 100%)',
     trend: '+12%',
-    desc: '当期符合预审查资格库'
+    desc: '当期符合预审查资格库',
+    permission: 'graduation:view'
   }
-])
+].filter((item) => can(item.permission)))
 
 // 常用业务快捷入口列表
 const quickActions = [
   {
     name: '考生档案建档',
     desc: '录入考生基本信息与电子考籍档案',
-    icon: 'User',
+    icon: 'User' as IconName,
     route: '/candidates',
     bg: 'rgba(59, 130, 246, 0.1)',
-    color: '#3b82f6'
+    color: '#3b82f6',
+    permission: 'candidate:view'
   },
   {
     name: '智能材料审核',
     desc: '自动分类、清晰度检测与异常提示',
-    icon: 'Picture',
+    icon: 'Picture' as IconName,
     route: '/materials',
     bg: 'rgba(245, 158, 11, 0.1)',
-    color: '#f59e0b'
+    color: '#f59e0b',
+    permission: 'material:audit:view'
   },
   {
     name: '免考申请审核',
     desc: '免考申请流程审核及业务归档',
-    icon: 'CircleCheck',
+    icon: 'CircleCheck' as IconName,
     route: '/exemptions',
     bg: 'rgba(168, 85, 247, 0.1)',
-    color: '#a855f7'
+    color: '#a855f7',
+    permission: 'exemption:view'
   },
   {
     name: '毕业预审判定',
     desc: '毕业生资格核实及学分条件测算',
-    icon: 'Medal',
+    icon: 'Medal' as IconName,
     route: '/graduations',
     bg: 'rgba(16, 185, 129, 0.1)',
-    color: '#10b981'
+    color: '#10b981',
+    permission: 'graduation:view'
   },
   {
     name: 'AI 智能辅助',
     desc: '向大语言模型提问考籍规则与判例',
-    icon: 'Service',
+    icon: 'Service' as IconName,
     route: '/ai',
     bg: 'rgba(239, 68, 68, 0.1)',
-    color: '#ef4444'
+    color: '#ef4444',
+    permission: 'ai:view'
   },
   {
     name: '系统安全日志',
     desc: '查看全部操作人员与操作历史记录',
-    icon: 'Setting',
+    icon: 'Setting' as IconName,
     route: '/system/logs',
     bg: 'rgba(107, 114, 128, 0.1)',
-    color: '#6b7280'
+    color: '#6b7280',
+    permission: 'system:log:view'
   }
-]
+].filter((action) => can(action.permission))
 
 // 业务进度与效率分析指标
 const progressStats = computed(() => [
@@ -347,7 +370,8 @@ const pendingTasks = [
     tagType: 'danger',
     color: '#ef4444',
     time: '10分钟前',
-    route: '/materials'
+    route: '/materials',
+    permission: 'material:audit:view'
   },
   {
     id: 2,
@@ -357,7 +381,8 @@ const pendingTasks = [
     tagType: 'warning',
     color: '#f59e0b',
     time: '45分钟前',
-    route: '/graduations'
+    route: '/graduations',
+    permission: 'graduation:view'
   },
   {
     id: 3,
@@ -367,9 +392,10 @@ const pendingTasks = [
     tagType: 'info',
     color: '#3b82f6',
     time: '2小时前',
-    route: '/transfers'
+    route: '/transfers',
+    permission: 'transfer:view'
   }
-]
+].filter((task) => can(task.permission))
 
 // 计算展示用的系统动态列表（优先使用真实 API 数据，使用精心设计的本地数据作为兜底）
 const displayLogs = computed(() => {
@@ -469,6 +495,10 @@ async function loadDashboardStats() {
  * 获取最新的 5 条审计记录，实现工作台最新动态的前后端交互联动。
  */
 async function loadRecentSystemLogs() {
+  if (!can('system:log:view')) {
+    return
+  }
+
   logsLoading.value = true
   try {
     const response = await pageOperationLogs({ pageNo: 1, pageSize: 5 })
@@ -485,7 +515,9 @@ async function loadRecentSystemLogs() {
 
 onMounted(() => {
   loadDashboardStats()
-  loadRecentSystemLogs()
+  if (can('system:log:view')) {
+    loadRecentSystemLogs()
+  }
   updateCurrentTime()
   timer = setInterval(updateCurrentTime, 1000)
 })
@@ -1056,4 +1088,3 @@ onUnmounted(() => {
   }
 }
 </style>
-
