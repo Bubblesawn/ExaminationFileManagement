@@ -31,6 +31,14 @@ public interface AiAssistService {
     MaterialUploadVO uploadMaterial(MultipartFile file);
 
     /**
+     * @brief 保存上传的语音文件。
+     *
+     * @param file 前端上传的语音文件。
+     * @return 可用于语音识别的音频访问信息。
+     */
+    MaterialUploadVO uploadSpeechAudio(MultipartFile file);
+
+    /**
      * @brief 调用算法服务材料预处理接口。
      *
      * @param dto 材料预处理请求对象。

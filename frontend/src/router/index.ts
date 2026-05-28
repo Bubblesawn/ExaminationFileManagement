@@ -43,7 +43,7 @@ router.beforeEach((to) => {
     }
   }
 
-  if (!hasPermission(to.meta.permission as string | undefined)) {
+  if (to.path !== '/dashboard' && !hasPermission(to.meta.permission as string | undefined)) {
     return '/dashboard'
   }
 

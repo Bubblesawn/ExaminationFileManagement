@@ -31,6 +31,23 @@
           <el-button type="primary" :icon="Search" @click="handleSearch">查询</el-button>
           <el-button :icon="Refresh" @click="resetQuery">重置</el-button>
         </el-form-item>
+        <el-form-item label="语音查询">
+          <div class="voice-query">
+            <el-upload
+              accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.webm"
+              :auto-upload="false"
+              :show-file-list="false"
+              :on-change="handleVoiceQueryUploadChange"
+            >
+              <el-button :loading="voiceQueryLoading" plain>上传识别</el-button>
+            </el-upload>
+            <el-button :loading="voiceQueryLoading" plain type="primary" @click="toggleVoiceRecording">
+              {{ recording ? '停止识别' : '开始语音' }}
+            </el-button>
+            <el-button :loading="ttsLoading" plain @click="playTransferQueryNotice">播报结果</el-button>
+            <span>{{ voiceQueryText || voiceHintText }}</span>
+          </div>
+        </el-form-item>
       </el-form>
     </el-card>
 
@@ -239,9 +256,10 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, UploadFile } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
+import { recognizeSpeech, synthesizeSpeech, uploadSpeechAudio } from '../../api/ai'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import {
   approveTransferApplication,
@@ -258,6 +276,8 @@ import {
 
 const loading = ref(false)
 const saving = ref(false)
+const voiceQueryLoading = ref(false)
+const ttsLoading = ref(false)
 const applications = ref<TransferApplication[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
@@ -270,6 +290,13 @@ const selectedApplication = ref<TransferApplication | null>(null)
 const flowRecords = ref<TransferFlowRecord[]>([])
 const formRef = ref<FormInstance>()
 const materialIdsText = ref('')
+const voiceQueryText = ref('')
+const lastNoticeText = ref('')
+const voiceHintText = ref('点击开始语音后自动查询转考申请')
+const recording = ref(false)
+const mediaRecorder = ref<MediaRecorder | null>(null)
+const recordedChunks = ref<BlobPart[]>([])
+const recordingStream = ref<MediaStream | null>(null)
 
 const query = reactive({
   pageNo: 1,
@@ -345,6 +372,7 @@ async function loadApplications() {
     })
     applications.value = result.records ?? []
     total.value = result.total ?? 0
+    lastNoticeText.value = buildTransferQueryNotice()
   } finally {
     loading.value = false
   }
@@ -360,7 +388,168 @@ function resetQuery() {
   query.keyword = ''
   query.transferType = ''
   query.applicationStatus = ''
+  voiceQueryText.value = ''
   loadApplications()
+}
+
+/**
+ * @brief 上传语音并调用 ASR，将识别文本作为转考申请查询关键字。
+ *
+ * @param uploadFile Element Plus 上传文件对象。
+ */
+async function handleVoiceQueryUploadChange(uploadFile: UploadFile) {
+  const file = uploadFile.raw
+  if (!file) return
+
+  await recognizeTransferVoiceFile(file)
+}
+
+/**
+ * @brief 启停浏览器录音，将麦克风语音直接转为转考查询条件。
+ */
+async function toggleVoiceRecording() {
+  if (recording.value) {
+    mediaRecorder.value?.stop()
+    return
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    ElMessage.warning('当前浏览器不支持直接录音，请使用上传识别')
+    return
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    recordingStream.value = stream
+    recordedChunks.value = []
+    const recorder = new MediaRecorder(stream)
+    mediaRecorder.value = recorder
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunks.value.push(event.data)
+      }
+    }
+    recorder.onstop = () => {
+      const voiceBlob = new Blob(recordedChunks.value, { type: recorder.mimeType || 'audio/webm' })
+      stopRecordingStream()
+      recording.value = false
+      voiceHintText.value = '录音结束，正在识别查询条件'
+      if (voiceBlob.size === 0) {
+        voiceHintText.value = '未采集到语音内容，请重新开始语音'
+        ElMessage.warning('未采集到语音内容')
+        return
+      }
+      const voiceFile = new File([voiceBlob], `transfer-voice-${Date.now()}.webm`, { type: voiceBlob.type })
+      recognizeTransferVoiceFile(voiceFile)
+    }
+
+    recorder.start()
+    recording.value = true
+    voiceHintText.value = '正在录音，请说出查询条件'
+    ElMessage.success('开始录音，请说出查询条件')
+  } catch (error) {
+    stopRecordingStream()
+    recording.value = false
+    voiceHintText.value = getMicrophoneErrorMessage(error)
+    ElMessage.error(voiceHintText.value)
+  }
+}
+
+/**
+ * @brief 调用 ASR 识别语音文件并刷新转考申请列表。
+ *
+ * @param file 浏览器录音或用户上传的语音文件。
+ */
+async function recognizeTransferVoiceFile(file: File) {
+
+  voiceQueryLoading.value = true
+  try {
+    const uploadResult = await uploadSpeechAudio(file)
+    const response = await recognizeSpeech({
+      audioUrl: uploadResult.fileUrl,
+      scene: 'TRANSFER',
+      languageHint: 'zh-CN'
+    })
+
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '语音查询识别失败')
+      return
+    }
+
+    voiceQueryText.value = response.data.text
+    applyTransferVoiceCommand(response.data.text)
+    query.pageNo = 1
+    await loadApplications()
+    voiceHintText.value = '语音查询已完成'
+    ElMessage.success('语音查询已完成')
+  } catch (error) {
+    voiceHintText.value = '语音查询失败，请重试或使用上传识别'
+    ElMessage.error(error instanceof Error ? error.message : '语音查询服务暂不可用')
+  } finally {
+    voiceQueryLoading.value = false
+  }
+}
+
+/**
+ * @brief 释放浏览器录音占用的麦克风资源。
+ */
+function stopRecordingStream() {
+  recordingStream.value?.getTracks().forEach((track) => track.stop())
+  recordingStream.value = null
+  mediaRecorder.value = null
+}
+
+/**
+ * @brief 将浏览器麦克风异常转换为中文业务提示。
+ *
+ * @param error 浏览器录音 API 抛出的异常。
+ * @return 面向管理人员的权限处理提示。
+ */
+function getMicrophoneErrorMessage(error: unknown) {
+  const errorName = error instanceof DOMException ? error.name : ''
+  if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+    return '麦克风权限被拒绝，请在浏览器地址栏允许麦克风后重试'
+  }
+  if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+    return '未检测到可用麦克风，请连接麦克风后重试'
+  }
+  if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+    return '麦克风正被其他程序占用，请关闭占用程序后重试'
+  }
+  return '无法访问麦克风，请检查浏览器权限或使用上传识别'
+}
+
+/**
+ * @brief 将转考查询结果摘要转换为语音播报。
+ */
+async function playTransferQueryNotice() {
+  const content = lastNoticeText.value || buildTransferQueryNotice()
+  if (!content) {
+    ElMessage.warning('暂无可播报的查询结果')
+    return
+  }
+
+  ttsLoading.value = true
+  try {
+    const response = await synthesizeSpeech({
+      content,
+      scene: 'TRANSFER'
+    })
+
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '语音播报调用失败')
+      return
+    }
+
+    const audio = new Audio(response.data.audio_url)
+    await audio.play().catch(() => undefined)
+    ElMessage.success('转考查询结果播报已生成')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '语音播报服务暂不可用')
+  } finally {
+    ttsLoading.value = false
+  }
 }
 
 function openCreateDrawer() {
@@ -552,6 +741,69 @@ function flowActionText(action?: string) {
   return actionMap[action || ''] || action || '-'
 }
 
+/**
+ * @brief 根据语音指令填充转考查询条件。
+ *
+ * @param text ASR 识别出的完整语音文本。
+ */
+function applyTransferVoiceCommand(text: string) {
+  const normalizedText = text.trim()
+  query.keyword = extractTransferKeyword(normalizedText)
+
+  if (normalizedText.includes('转入')) {
+    query.transferType = 'TRANSFER_IN'
+  } else if (normalizedText.includes('转出')) {
+    query.transferType = 'TRANSFER_OUT'
+  }
+
+  if (normalizedText.includes('通过')) {
+    query.applicationStatus = 'APPROVED'
+  } else if (normalizedText.includes('驳回') || normalizedText.includes('拒绝')) {
+    query.applicationStatus = 'REJECTED'
+  } else if (normalizedText.includes('撤回')) {
+    query.applicationStatus = 'WITHDRAWN'
+  } else if (normalizedText.includes('提交') || normalizedText.includes('待审')) {
+    query.applicationStatus = 'SUBMITTED'
+  }
+}
+
+/**
+ * @brief 从语音识别文本中提取转考申请检索关键字。
+ *
+ * @param text ASR 识别出的完整语音文本。
+ * @return 用于申请编号、姓名或考籍号模糊查询的关键字。
+ */
+function extractTransferKeyword(text: string) {
+  const codeMatch = text.match(/[A-Za-z]{1,4}[0-9A-Za-z]{6,}/)
+  if (codeMatch) return codeMatch[0]
+
+  const numberMatch = text.match(/[0-9Xx]{6,}/)
+  if (numberMatch) return numberMatch[0]
+
+  return text
+    .replace(/请|帮我|查询|查一下|转入|转出|转考|申请|考籍|档案|考生|信息|状态|业务|办理|通过|驳回|拒绝|撤回|提交|待审/g, '')
+    .replace(/[，。,.？?\s]/g, '')
+    .trim()
+}
+
+/**
+ * @brief 构造转考申请查询结果播报文本。
+ *
+ * @return 可提交给 TTS 的查询结果摘要。
+ */
+function buildTransferQueryNotice() {
+  const keywordText = query.keyword ? `关键字 ${query.keyword}` : '当前条件'
+  if (total.value === 0) {
+    return `${keywordText} 未查询到匹配的转考申请，请调整条件后重试。`
+  }
+
+  const firstApplication = applications.value[0]
+  const firstApplicationText = firstApplication
+    ? `首条申请为 ${firstApplication.candidateName || '未知考生'}，申请编号 ${firstApplication.applicationNo}，${transferTypeText(firstApplication.businessType)}，状态 ${applicationStatusText(firstApplication.applicationStatus)}。`
+    : ''
+  return `${keywordText} 共查询到 ${total.value} 条转考申请。${firstApplicationText}`
+}
+
 onMounted(loadApplications)
 </script>
 
@@ -588,6 +840,22 @@ onMounted(loadApplications)
 
 .query-form :deep(.el-select) {
   width: 180px;
+}
+
+.voice-query {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.voice-query span {
+  max-width: 320px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pagination-wrapper {

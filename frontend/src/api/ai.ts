@@ -199,6 +199,46 @@ export interface AiChatRequest {
   scene?: string
 }
 
+export interface AiSpeechRequest {
+  audioUrl: string
+  businessId?: number
+  scene?: string
+  languageHint?: string
+}
+
+export interface SpeechRecognitionSegment {
+  start_time: number
+  end_time: number
+  text: string
+  confidence: number
+}
+
+export interface SpeechRecognitionData {
+  business_id?: number
+  audio_url: string
+  scene?: string
+  language: string
+  text: string
+  duration_seconds: number
+  confidence: number
+  segments: SpeechRecognitionSegment[]
+  suggested_action: SuggestedAction
+  need_manual_review: boolean
+}
+
+export interface SpeechSynthesisData {
+  business_id?: number
+  text: string
+  scene?: string
+  voice_name: string
+  language: string
+  audio_url: string
+  audio_format: string
+  duration_seconds: number
+  sample_rate: number
+  suggested_action: SuggestedAction
+}
+
 export interface ChatReference {
   title: string
   content: string
@@ -253,6 +293,23 @@ export function uploadMaterialFile(file: File) {
 }
 
 /**
+ * @brief 上传语音文件并返回后端生成的访问地址。
+ *
+ * @param file 前端选择的语音文件。
+ * @return 上传后的语音文件元信息。
+ */
+export function uploadSpeechAudio(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post<unknown, MaterialUploadData>('/ai/speech/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 30000
+  })
+}
+
+/**
  * @brief 调用申请材料智能核验接口。
  *
  * @param payload 申请材料核验请求参数。
@@ -295,4 +352,24 @@ export function preprocessMaterial(payload: MaterialPreprocessRequest) {
  */
 export function askAiQuestion(payload: AiChatRequest) {
   return http.post<unknown, AlgorithmResponse<ChatAnswerData>>('/ai/chat', payload)
+}
+
+/**
+ * @brief 调用后端语音识别接口。
+ *
+ * @param payload 语音识别请求参数。
+ * @return 后端封装后的语音识别算法响应。
+ */
+export function recognizeSpeech(payload: AiSpeechRequest) {
+  return http.post<unknown, AlgorithmResponse<SpeechRecognitionData>>('/ai/asr', payload)
+}
+
+/**
+ * @brief 调用后端语音播报接口。
+ *
+ * @param payload 语音播报请求参数。
+ * @return 后端封装后的语音合成算法响应。
+ */
+export function synthesizeSpeech(payload: AiChatRequest) {
+  return http.post<unknown, AlgorithmResponse<SpeechSynthesisData>>('/ai/tts', payload)
 }

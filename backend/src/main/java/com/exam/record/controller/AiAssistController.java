@@ -61,6 +61,17 @@ public class AiAssistController {
     }
 
     /**
+     * @brief 上传语音识别音频文件。
+     *
+     * @param file 前端上传的语音文件。
+     * @return 音频文件访问地址和元信息。
+     */
+    @PostMapping("/speech/upload")
+    public Result<MaterialUploadVO> uploadSpeechAudio(MultipartFile file) {
+        return Result.success(aiAssistService.uploadSpeechAudio(file));
+    }
+
+    /**
      * @brief 调用材料预处理能力。
      *
      * @param dto 材料预处理请求对象。

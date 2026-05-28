@@ -64,7 +64,7 @@ public class AuthController {
      * @return 当前登录用户信息。
      */
     @GetMapping("/me")
-    public Result<TokenUserVO> me(@RequestHeader("Authorization") String authorization) {
+    public Result<TokenUserVO> me(@RequestHeader(value = "Authorization", required = false) String authorization) {
         return Result.success(authService.verifyToken(extractToken(authorization)));
     }
 

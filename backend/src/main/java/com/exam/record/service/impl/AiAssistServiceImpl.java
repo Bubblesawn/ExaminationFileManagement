@@ -50,7 +50,9 @@ import java.util.stream.Collectors;
 public class AiAssistServiceImpl implements AiAssistService {
     private static final String ALGORITHM_API_KEY_HEADER = "X-Internal-Api-Key";
     private static final long MAX_MATERIAL_FILE_SIZE = 10 * 1024 * 1024;
+    private static final long MAX_AUDIO_FILE_SIZE = 20 * 1024 * 1024;
     private static final Set<String> SUPPORTED_MATERIAL_SUFFIXES = Set.of("jpg", "jpeg", "png", "bmp", "webp");
+    private static final Set<String> SUPPORTED_AUDIO_SUFFIXES = Set.of("wav", "mp3", "m4a", "aac", "flac", "ogg", "webm");
     private static final DateTimeFormatter UPLOAD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final TypeReference<List<Long>> MATERIAL_ID_LIST_TYPE = new TypeReference<>() {
     };
@@ -142,6 +144,57 @@ public class AiAssistServiceImpl implements AiAssistService {
         return new MaterialUploadVO(
                 originalFilename,
                 "/uploads/materials/" + dateDirectoryName + "/" + savedFilename,
+                file.getContentType(),
+                file.getSize());
+    }
+
+    /**
+     * @brief 保存上传的语音识别音频。
+     *
+     * @details
+     * 校验音频大小和扩展名后写入 uploads/speech 目录，返回算法服务可识别的
+     * 静态访问地址，用于管理人员语音查询和语音业务指令识别。
+     *
+     * @param file 前端上传的语音文件。
+     * @return 上传后的音频文件元信息。
+     */
+    @Override
+    public MaterialUploadVO uploadSpeechAudio(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(400, "请先选择要识别的语音文件");
+        }
+        if (file.getSize() > MAX_AUDIO_FILE_SIZE) {
+            throw new BusinessException(400, "语音文件不能超过 20MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        String suffix = getFileSuffix(originalFilename);
+        if (!SUPPORTED_AUDIO_SUFFIXES.contains(suffix)) {
+            throw new BusinessException(415, "仅支持 wav、mp3、m4a、aac、flac、ogg、webm 格式语音");
+        }
+
+        String dateDirectoryName = LocalDate.now().format(UPLOAD_DATE_FORMATTER);
+        String savedFilename = UUID.randomUUID() + "." + suffix;
+        Path speechRootPath = uploadRootPath.getParent() == null
+                ? Path.of("uploads", "speech").toAbsolutePath().normalize()
+                : uploadRootPath.getParent().resolve("speech").toAbsolutePath().normalize();
+        Path targetDirectory = speechRootPath.resolve(dateDirectoryName).normalize();
+        Path targetPath = targetDirectory.resolve(savedFilename).normalize();
+        if (!targetPath.startsWith(speechRootPath)) {
+            throw new BusinessException(400, "语音文件路径不合法");
+        }
+
+        try {
+            Files.createDirectories(targetDirectory);
+            file.transferTo(targetPath);
+        } catch (IOException exception) {
+            log.error("语音文件上传失败 originalFilename={} targetPath={}", originalFilename, targetPath, exception);
+            throw new BusinessException(500, "语音文件保存失败");
+        }
+
+        return new MaterialUploadVO(
+                originalFilename,
+                "/uploads/speech/" + dateDirectoryName + "/" + savedFilename,
                 file.getContentType(),
                 file.getSize());
     }

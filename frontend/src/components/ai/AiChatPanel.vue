@@ -26,6 +26,21 @@
           <el-col :xs="24" :sm="8">
             <el-row :gutter="12">
               <el-col :xs="24">
+                <el-form-item label="语音输入">
+                  <div class="speech-upload">
+                    <el-upload
+                      accept=".wav,.mp3,.m4a,.aac,.flac,.ogg"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      :on-change="handleSpeechUploadChange"
+                    >
+                      <el-button :loading="speechLoading" plain>识别语音</el-button>
+                    </el-upload>
+                    <span>{{ speechFileName || '上传语音后自动填入问题' }}</span>
+                  </div>
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24">
                 <el-form-item label="业务场景">
                   <el-select v-model="scene" placeholder="请选择">
                     <el-option label="考籍档案" value="ARCHIVE" />
@@ -61,6 +76,10 @@
             </div>
             <h4>{{ currentAnswer.question }}</h4>
             <p>{{ currentAnswer.answer }}</p>
+            <div class="voice-actions">
+              <el-button type="primary" plain :loading="ttsLoading" @click="playAnswerVoice">播报回答</el-button>
+              <span v-if="ttsAudioUrl">已生成 {{ currentTtsDuration }} 秒语音</span>
+            </div>
           </div>
 
           <div v-if="currentAnswer.references.length" class="info-block">
@@ -114,7 +133,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { askAiQuestion, type ChatAnswerData } from '../../api/ai'
+import type { UploadFile } from 'element-plus'
+import {
+  askAiQuestion,
+  recognizeSpeech,
+  synthesizeSpeech,
+  uploadSpeechAudio,
+  type ChatAnswerData
+} from '../../api/ai'
 
 interface ChatHistoryRecord {
   id: number
@@ -129,8 +155,13 @@ const question = ref('材料上传后智能审核不通过应该怎么处理？'
 const scene = ref('MATERIAL_AUDIT')
 const businessId = ref(2026052701)
 const loading = ref(false)
+const speechLoading = ref(false)
+const ttsLoading = ref(false)
 const currentAnswer = ref<ChatAnswerData | null>(null)
 const historyRecords = ref<ChatHistoryRecord[]>([])
+const speechFileName = ref('')
+const ttsAudioUrl = ref('')
+const currentTtsDuration = ref(0)
 
 onMounted(() => {
   historyRecords.value = loadHistory()
@@ -160,6 +191,8 @@ async function submitQuestion() {
     }
 
     currentAnswer.value = normalizeAnswer(response.data, content)
+    ttsAudioUrl.value = ''
+    currentTtsDuration.value = 0
     saveHistory(currentAnswer.value)
     ElMessage.success('智能问答已返回')
   } catch (error) {
@@ -169,12 +202,82 @@ async function submitQuestion() {
   }
 }
 
+/**
+ * @brief 上传语音并调用 ASR，将识别文本融入智能问答输入框。
+ *
+ * @param uploadFile Element Plus 上传文件对象。
+ */
+async function handleSpeechUploadChange(uploadFile: UploadFile) {
+  const file = uploadFile.raw
+  if (!file) return
+
+  speechLoading.value = true
+  try {
+    const uploadResult = await uploadSpeechAudio(file)
+    speechFileName.value = uploadResult.fileName || file.name
+    const response = await recognizeSpeech({
+      audioUrl: uploadResult.fileUrl,
+      businessId: businessId.value,
+      scene: scene.value,
+      languageHint: 'zh-CN'
+    })
+
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '语音识别调用失败')
+      return
+    }
+
+    question.value = response.data.text
+    ElMessage.success('语音已识别，可继续提交问答')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '语音识别服务暂不可用')
+  } finally {
+    speechLoading.value = false
+  }
+}
+
+/**
+ * @brief 将当前问答回答转换为语音播报。
+ */
+async function playAnswerVoice() {
+  if (!currentAnswer.value?.answer) {
+    ElMessage.warning('暂无可播报的回答内容')
+    return
+  }
+
+  ttsLoading.value = true
+  try {
+    const response = await synthesizeSpeech({
+      content: currentAnswer.value.answer,
+      businessId: businessId.value,
+      scene: scene.value
+    })
+
+    if (response.code !== 200) {
+      ElMessage.error(response.message || '语音播报调用失败')
+      return
+    }
+
+    ttsAudioUrl.value = response.data.audio_url
+    currentTtsDuration.value = response.data.duration_seconds
+    const audio = new Audio(response.data.audio_url)
+    await audio.play().catch(() => undefined)
+    ElMessage.success('语音播报已生成')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '语音播报服务暂不可用')
+  } finally {
+    ttsLoading.value = false
+  }
+}
+
 function useSuggestion(suggestion: string) {
   question.value = suggestion
 }
 
 function selectHistory(record: ChatHistoryRecord) {
   currentAnswer.value = record.answer
+  ttsAudioUrl.value = ''
+  currentTtsDuration.value = 0
   question.value = record.answer.question
   scene.value = record.answer.scene || scene.value
   businessId.value = record.answer.business_id || businessId.value
@@ -283,6 +386,22 @@ function formatPercent(value?: number) {
   justify-content: flex-end;
 }
 
+.speech-upload {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.speech-upload span,
+.voice-actions span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .answer-area {
   margin-top: 18px;
 }
@@ -304,6 +423,13 @@ function formatPercent(value?: number) {
   margin: 0;
   color: #334155;
   line-height: 1.7;
+}
+
+.voice-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .answer-meta {

@@ -45,7 +45,7 @@ from app.services.image_analysis_service import (
 SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SUPPORTED_DOCUMENT_SUFFIXES = (".pdf",)
 SUPPORTED_MATERIAL_SUFFIXES = SUPPORTED_IMAGE_SUFFIXES + SUPPORTED_DOCUMENT_SUFFIXES
-SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg")
+SUPPORTED_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".webm")
 MAX_MATERIAL_SIZE_KB = 10 * 1024
 MIN_AUTO_ACCEPT_CONFIDENCE = 0.85
 MIN_REVIEW_CONFIDENCE = 0.6

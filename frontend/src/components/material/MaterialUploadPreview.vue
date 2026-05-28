@@ -19,7 +19,14 @@
 
     <el-form class="upload-form" label-position="top" @submit.prevent>
       <el-form-item label="材料类型">
-        <el-select v-model="selectedMaterialType" placeholder="请选择材料类型" filterable :disabled="!recordId">
+        <el-select
+          v-model="selectedMaterialType"
+          :placeholder="materialTypePlaceholder"
+          filterable
+          :loading="materialTypeLoading"
+          :disabled="!recordId || materialTypes.length === 0"
+          @visible-change="handleMaterialTypeDropdownVisible"
+        >
           <el-option
             v-for="item in materialTypes"
             :key="item.typeCode"
@@ -32,7 +39,7 @@
       <el-upload
         drag
         action="#"
-        :disabled="!recordId || !selectedMaterialType"
+        :disabled="!recordId || materialTypes.length === 0"
         :show-file-list="false"
         :http-request="handleUploadRequest"
         :before-upload="validateBeforeUpload"
@@ -45,6 +52,21 @@
         </template>
       </el-upload>
     </el-form>
+
+    <el-alert
+      v-if="uploadDisabledReason"
+      :title="uploadDisabledReason"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="material-alert"
+    >
+      <template #default>
+        <el-button v-if="recordId && materialTypes.length === 0" link type="primary" @click="loadMaterialTypes">
+          重新加载材料类型
+        </el-button>
+      </template>
+    </el-alert>
 
     <el-table v-loading="loading" :data="materials" border class="material-table">
       <el-table-column prop="originalFileName" label="文件名称" min-width="190" show-overflow-tooltip />
@@ -115,6 +137,7 @@ const allowedSuffixes = new Set(['jpg', 'jpeg', 'png', 'pdf'])
 const maxFileSize = 20 * 1024 * 1024
 
 const loading = ref(false)
+const materialTypeLoading = ref(false)
 const previewLoading = ref(false)
 const materialTypes = ref<MaterialType[]>([])
 const materials = ref<RecordMaterial[]>([])
@@ -124,6 +147,20 @@ const previewObjectUrl = ref('')
 const previewMaterial = ref<RecordMaterial | null>(null)
 
 const previewTitle = computed(() => previewMaterial.value?.originalFileName || '材料预览')
+const materialTypePlaceholder = computed(() => {
+  if (!props.recordId) return '请先选择考籍档案'
+  if (materialTypeLoading.value) return '正在加载材料类型'
+  if (materialTypes.value.length === 0) return '暂无可用材料类型'
+  return '请选择材料类型'
+})
+const uploadDisabledReason = computed(() => {
+  if (!props.recordId) return '请先选择考籍档案后再上传材料。'
+  if (!materialTypeLoading.value && materialTypes.value.length === 0) {
+    return '当前没有可用材料类型，无法上传材料。请先导入 sql/test-data.sql，或在材料类型维护中新增启用的材料类型。'
+  }
+  if (!selectedMaterialType.value) return '请先选择材料类型，再点击上传区域选择文件。'
+  return ''
+})
 const previewKind = computed(() => {
   const suffix = previewMaterial.value?.fileSuffix?.toLowerCase()
   const mimeType = previewMaterial.value?.mimeType
@@ -148,9 +185,14 @@ async function loadInitialData() {
  * @brief 加载启用材料类型，并自动选中第一项。
  */
 async function loadMaterialTypes() {
-  materialTypes.value = await listEnabledMaterialTypes()
-  if (!selectedMaterialType.value && materialTypes.value.length > 0) {
-    selectedMaterialType.value = materialTypes.value[0].typeCode
+  materialTypeLoading.value = true
+  try {
+    materialTypes.value = await listEnabledMaterialTypes()
+    if (!selectedMaterialType.value && materialTypes.value.length > 0) {
+      selectedMaterialType.value = materialTypes.value[0].typeCode
+    }
+  } finally {
+    materialTypeLoading.value = false
   }
 }
 
@@ -177,6 +219,10 @@ async function loadMaterials() {
  * @return 是否允许继续上传。
  */
 function validateBeforeUpload(file: UploadRawFile) {
+  if (!selectedMaterialType.value) {
+    ElMessage.warning('请先选择材料类型')
+    return false
+  }
   const suffix = extractSuffix(file.name)
   const mimeAllowed = !file.type || allowedMimeTypes.has(file.type)
   const suffixAllowed = allowedSuffixes.has(suffix)
@@ -211,6 +257,17 @@ async function handleUploadRequest(options: UploadRequestOptions) {
     ElMessage.success('材料上传成功')
   } catch (error) {
     options.onError((error instanceof Error ? error : new Error('材料上传失败')) as never)
+  }
+}
+
+/**
+ * @brief 下拉展开时补偿加载材料类型，避免接口短暂失败后一直为空。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleMaterialTypeDropdownVisible(visible: boolean) {
+  if (visible && props.recordId && materialTypes.value.length === 0 && !materialTypeLoading.value) {
+    loadMaterialTypes()
   }
 }
 

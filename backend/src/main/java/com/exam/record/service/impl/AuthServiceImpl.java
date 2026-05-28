@@ -120,6 +120,9 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public TokenUserVO verifyToken(String token) {
+        if (!StringUtils.hasText(token)) {
+            return authTokenUtil.parseToken(token);
+        }
         if (invalidTokens.contains(token)) {
             throw new BusinessException(401, "登录凭证已退出");
         }

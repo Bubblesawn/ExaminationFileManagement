@@ -17,6 +17,7 @@ public class WebConfig implements WebMvcConfigurer {
     private final PermissionInterceptor permissionInterceptor;
     private final OperationLogInterceptor operationLogInterceptor;
     private final Path materialUploadPath;
+    private final Path speechUploadPath;
 
     /**
      * @brief 构造 Web MVC 配置。
@@ -34,6 +35,9 @@ public class WebConfig implements WebMvcConfigurer {
         this.permissionInterceptor = permissionInterceptor;
         this.operationLogInterceptor = operationLogInterceptor;
         this.materialUploadPath = Path.of(materialUploadRoot).toAbsolutePath().normalize();
+        this.speechUploadPath = this.materialUploadPath.getParent() == null
+                ? Path.of("uploads", "speech").toAbsolutePath().normalize()
+                : this.materialUploadPath.getParent().resolve("speech").toAbsolutePath().normalize();
     }
 
     /**
@@ -59,6 +63,8 @@ public class WebConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/uploads/materials/**")
                 .addResourceLocations(materialUploadPath.toUri().toString() + "/");
+        registry.addResourceHandler("/uploads/speech/**")
+                .addResourceLocations(speechUploadPath.toUri().toString() + "/");
     }
 
     /**
