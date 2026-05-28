@@ -58,9 +58,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="submitTime" label="提交时间" min-width="170" show-overflow-tooltip />
-        <el-table-column label="操作" width="310" fixed="right">
+        <el-table-column label="操作" width="420" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="View" @click="openDetailDrawer(row)">详情</el-button>
+            <el-button
+              v-if="row.applicationStatus === 'APPROVED' || row.applicationStatus === 'REJECTED'"
+              link
+              type="primary"
+              :icon="DocumentChecked"
+              @click="openResultDrawer(row)"
+            >
+              结果
+            </el-button>
             <el-button
               v-if="row.applicationStatus === 'SUBMITTED'"
               link
@@ -69,6 +78,15 @@
               @click="openEditDrawer(row)"
             >
               编辑
+            </el-button>
+            <el-button
+              v-if="row.applicationStatus === 'SUBMITTED'"
+              link
+              type="warning"
+              :icon="RefreshLeft"
+              @click="openWithdrawDialog(row)"
+            >
+              撤回
             </el-button>
             <el-button
               v-if="row.applicationStatus === 'SUBMITTED'"
@@ -108,8 +126,20 @@
     <el-drawer v-model="formDrawerVisible" :title="formMode === 'create' ? '新增毕业申请' : '编辑毕业申请'" size="720px">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
         <el-form-item v-if="formMode === 'create'" label="考籍档案ID" prop="recordId">
-          <el-input-number v-model="form.recordId" :min="1" controls-position="right" />
-          <el-button class="inline-action" :icon="CircleCheck" @click="handleEligibilityCheck">资格校验</el-button>
+          <div class="record-check-field">
+            <el-input-number v-model="form.recordId" :min="1" controls-position="right" @change="clearEligibility" />
+            <el-button :icon="CircleCheck" :loading="checkingEligibility" @click="handleEligibilityCheck">
+              资格校验
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="考籍档案ID">
+          <div class="record-check-field">
+            <el-input-number v-model="form.recordId" :min="1" controls-position="right" disabled />
+            <el-button :icon="CircleCheck" :loading="checkingEligibility" @click="handleEligibilityCheck">
+              重新校验
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="毕业批次" prop="graduationBatch">
           <el-input v-model="form.graduationBatch" placeholder="例如：2026年上半年" maxlength="64" show-word-limit />
@@ -140,11 +170,25 @@
         show-icon
         :closable="false"
       >
-        <div class="eligibility-list">
-          <p v-for="item in eligibility.passedItems" :key="`p-${item}`">通过：{{ item }}</p>
-          <p v-for="item in eligibility.failedItems" :key="`f-${item}`">未通过：{{ item }}</p>
-          <p v-for="item in eligibility.warningItems" :key="`w-${item}`">提醒：{{ item }}</p>
-        </div>
+        <template #default>
+          <div class="eligibility-grid">
+            <div class="eligibility-block">
+              <strong>已通过</strong>
+              <p v-for="item in eligibility.passedItems" :key="`p-${item}`">{{ item }}</p>
+              <p v-if="!eligibility.passedItems.length" class="muted-text">暂无通过项</p>
+            </div>
+            <div class="eligibility-block failed">
+              <strong>未通过</strong>
+              <p v-for="item in eligibility.failedItems" :key="`f-${item}`">{{ item }}</p>
+              <p v-if="!eligibility.failedItems.length" class="muted-text">暂无未通过项</p>
+            </div>
+            <div class="eligibility-block warning">
+              <strong>提醒项</strong>
+              <p v-for="item in eligibility.warningItems" :key="`w-${item}`">{{ item }}</p>
+              <p v-if="!eligibility.warningItems.length" class="muted-text">暂无提醒项</p>
+            </div>
+          </div>
+        </template>
       </el-alert>
 
       <template #footer>
@@ -158,33 +202,84 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="申请编号">{{ selectedApplication.applicationNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ applicationStatusText(selectedApplication.applicationStatus) }}</el-descriptions-item>
+          <el-descriptions-item label="考籍档案ID">{{ selectedApplication.recordId }}</el-descriptions-item>
           <el-descriptions-item label="考生姓名">{{ selectedApplication.candidateName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="考籍号">{{ selectedApplication.recordNo || '-' }}</el-descriptions-item>
           <el-descriptions-item label="专业">{{ selectedApplication.majorName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="毕业批次">{{ selectedApplication.graduationBatch || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="学位类型">{{ degreeApplyTypeText(selectedApplication.degreeApplyType) }}</el-descriptions-item>
+          <el-descriptions-item label="申请材料ID">
+            {{ selectedApplication.materialIds?.length ? selectedApplication.materialIds.join('、') : '-' }}
+          </el-descriptions-item>
           <el-descriptions-item label="资格校验" :span="2">
             {{ selectedApplication.eligibilitySummary || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="申请原因" :span="2">
+            {{ selectedApplication.applyReason || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="审核意见" :span="2">
             {{ selectedApplication.auditOpinion || '-' }}
           </el-descriptions-item>
+          <el-descriptions-item label="备注" :span="2">
+            {{ selectedApplication.remark || '-' }}
+          </el-descriptions-item>
         </el-descriptions>
 
         <h3 class="section-title">流程记录</h3>
-        <el-timeline>
+        <el-empty v-if="!flowRecords.length" description="暂无流程记录" />
+        <el-timeline v-else>
           <el-timeline-item
             v-for="record in flowRecords"
             :key="record.id"
             :timestamp="record.operationTime"
             placement="top"
           >
-            {{ flowActionText(record.auditAction) }}：{{ record.auditOpinion || '-' }}
+            <div class="timeline-title">
+              {{ flowActionText(record.auditAction) }}
+              <el-tag size="small" :type="applicationStatusTag(record.afterStatus)">
+                {{ applicationStatusText(record.afterStatus) }}
+              </el-tag>
+            </div>
+            <p class="timeline-content">{{ record.auditOpinion || '-' }}</p>
+            <p class="timeline-meta">操作人：{{ record.auditorName || '-' }}</p>
           </el-timeline-item>
         </el-timeline>
       </template>
     </el-drawer>
 
+    <el-drawer v-model="resultDrawerVisible" title="毕业申请结果" size="760px">
+      <template v-if="resultApplication">
+        <el-result
+          :icon="resultApplication.applicationStatus === 'APPROVED' ? 'success' : 'error'"
+          :title="applicationStatusText(resultApplication.applicationStatus)"
+          :sub-title="resultApplication.auditOpinion || resultApplication.eligibilitySummary || '暂无结果说明'"
+        />
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="申请编号">{{ resultApplication.applicationNo }}</el-descriptions-item>
+          <el-descriptions-item label="毕业批次">{{ resultApplication.graduationBatch || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="考生姓名">{{ resultApplication.candidateName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="考籍号">{{ resultApplication.recordNo || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="专业">{{ resultApplication.majorName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="学位类型">{{ degreeApplyTypeText(resultApplication.degreeApplyType) }}</el-descriptions-item>
+          <el-descriptions-item label="资格校验" :span="2">
+            {{ resultApplication.eligibilitySummary || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="审核人">{{ resultApplication.auditUserName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="审核时间">{{ resultApplication.auditTime || '-' }}</el-descriptions-item>
+        </el-descriptions>
+      </template>
+    </el-drawer>
+
     <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="520px">
+      <el-alert
+        v-if="selectedApplication"
+        class="audit-summary"
+        :type="selectedApplication.eligibilityPassed ? 'success' : 'warning'"
+        :title="selectedApplication.eligibilityPassed ? '当前资格校验已通过' : '当前资格校验未通过或未返回通过状态'"
+        :description="selectedApplication.eligibilitySummary || '审核通过时后端会再次执行资格校验。'"
+        show-icon
+        :closable="false"
+      />
       <el-form :model="auditForm" label-width="90px">
         <el-form-item label="审核意见">
           <el-input v-model="auditForm.auditOpinion" type="textarea" :rows="4" maxlength="512" show-word-limit />
@@ -195,6 +290,18 @@
         <el-button type="primary" :loading="saving" @click="submitAudit">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="withdrawDialogVisible" title="撤回毕业申请" width="520px">
+      <el-form :model="withdrawForm" label-width="90px">
+        <el-form-item label="撤回原因">
+          <el-input v-model="withdrawForm.withdrawReason" type="textarea" :rows="4" maxlength="512" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="withdrawDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitWithdraw">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -202,16 +309,18 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
-import { CircleCheck, CircleClose, Edit, Plus, Refresh, Search, View } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose, DocumentChecked, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import {
   approveGraduationApplication,
   checkGraduationEligibility,
   getGraduationApplicationDetail,
+  getGraduationApplicationResult,
   listGraduationFlowRecords,
   pageGraduationApplications,
   rejectGraduationApplication,
   submitGraduationApplication,
   updateGraduationApplication,
+  withdrawGraduationApplication,
   type GraduationApplication,
   type GraduationEligibility,
   type GraduationFlowRecord
@@ -219,14 +328,18 @@ import {
 
 const loading = ref(false)
 const saving = ref(false)
+const checkingEligibility = ref(false)
 const applications = ref<GraduationApplication[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
 const detailDrawerVisible = ref(false)
+const resultDrawerVisible = ref(false)
 const auditDialogVisible = ref(false)
+const withdrawDialogVisible = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const auditMode = ref<'approve' | 'reject'>('approve')
 const selectedApplication = ref<GraduationApplication | null>(null)
+const resultApplication = ref<GraduationApplication | null>(null)
 const eligibility = ref<GraduationEligibility | null>(null)
 const flowRecords = ref<GraduationFlowRecord[]>([])
 const formRef = ref<FormInstance>()
@@ -250,6 +363,10 @@ const form = reactive({
 
 const auditForm = reactive({
   auditOpinion: ''
+})
+
+const withdrawForm = reactive({
+  withdrawReason: ''
 })
 
 const formRules: FormRules = {
@@ -327,6 +444,11 @@ async function openDetailDrawer(row: GraduationApplication) {
   detailDrawerVisible.value = true
 }
 
+async function openResultDrawer(row: GraduationApplication) {
+  resultApplication.value = await getGraduationApplicationResult(row.id)
+  resultDrawerVisible.value = true
+}
+
 function openAuditDrawer(row: GraduationApplication, mode: 'approve' | 'reject') {
   selectedApplication.value = row
   auditMode.value = mode
@@ -334,12 +456,30 @@ function openAuditDrawer(row: GraduationApplication, mode: 'approve' | 'reject')
   auditDialogVisible.value = true
 }
 
+function openWithdrawDialog(row: GraduationApplication) {
+  selectedApplication.value = row
+  withdrawForm.withdrawReason = ''
+  withdrawDialogVisible.value = true
+}
+
+function clearEligibility() {
+  eligibility.value = null
+}
+
+/**
+ * @brief 根据考籍档案ID执行毕业资格校验，并将通过项、未通过项和提醒项展示在申请表单中。
+ */
 async function handleEligibilityCheck() {
   if (!form.recordId) {
     ElMessage.warning('请先输入考籍档案ID')
     return
   }
-  eligibility.value = await checkGraduationEligibility(form.recordId)
+  checkingEligibility.value = true
+  try {
+    eligibility.value = await checkGraduationEligibility(form.recordId)
+  } finally {
+    checkingEligibility.value = false
+  }
 }
 
 async function submitForm() {
@@ -388,6 +528,23 @@ async function submitAudit() {
   }
 }
 
+async function submitWithdraw() {
+  if (!selectedApplication.value) return
+  if (!withdrawForm.withdrawReason.trim()) {
+    ElMessage.warning('请输入撤回原因')
+    return
+  }
+  saving.value = true
+  try {
+    await withdrawGraduationApplication(selectedApplication.value.id, withdrawForm)
+    ElMessage.success('撤回成功')
+    withdrawDialogVisible.value = false
+    loadApplications()
+  } finally {
+    saving.value = false
+  }
+}
+
 function parseMaterialIds() {
   if (!materialIdsText.value.trim()) {
     return []
@@ -396,6 +553,15 @@ function parseMaterialIds() {
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isFinite(item) && item > 0)
+}
+
+function degreeApplyTypeText(type?: string) {
+  const typeMap: Record<string, string> = {
+    NONE: '不申请学位',
+    DEGREE: '同时申请学位',
+    DIPLOMA_ONLY: '仅毕业证'
+  }
+  return typeMap[type || ''] || type || '-'
 }
 
 function applicationStatusText(status?: string) {
@@ -471,16 +637,53 @@ onMounted(loadApplications)
   padding-top: 16px;
 }
 
-.inline-action {
-  margin-left: 10px;
+.record-check-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .eligibility-alert {
   margin-top: 16px;
 }
 
-.eligibility-list p {
+.eligibility-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.eligibility-block {
+  min-height: 86px;
+  padding: 10px 12px;
+  border: 1px solid #c6e2ff;
+  border-radius: 8px;
+  background: #f4faff;
+}
+
+.eligibility-block.failed {
+  border-color: #fcd3d3;
+  background: #fff7f7;
+}
+
+.eligibility-block.warning {
+  border-color: #faecd8;
+  background: #fffaf2;
+}
+
+.eligibility-block strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.eligibility-block p {
   margin: 4px 0;
+}
+
+.muted-text {
+  color: #94a3b8;
 }
 
 .section-title {
@@ -488,10 +691,31 @@ onMounted(loadApplications)
   font-size: 16px;
 }
 
+.timeline-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.timeline-content,
+.timeline-meta {
+  margin: 6px 0 0;
+  color: #64748b;
+}
+
+.audit-summary {
+  margin-bottom: 14px;
+}
+
 @media (max-width: 768px) {
   .page-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .eligibility-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
