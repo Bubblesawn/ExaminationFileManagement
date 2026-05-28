@@ -266,6 +266,18 @@ export function auditApplicationMaterials(payload: ApplicationMaterialAuditReque
 }
 
 /**
+ * @brief 根据业务申请ID调用申请材料智能核验接口。
+ *
+ * @param applicationId 业务申请ID。
+ * @return 后端自动组装材料后的申请材料核验算法响应。
+ */
+export function auditApplicationMaterialsByApplicationId(applicationId: number) {
+  return http.post<unknown, AlgorithmResponse<ApplicationMaterialAuditData>>(
+    `/ai/applications/${applicationId}/material-audit`
+  )
+}
+
+/**
  * @brief 调用材料预处理接口。
  *
  * @param payload 材料预处理请求参数。

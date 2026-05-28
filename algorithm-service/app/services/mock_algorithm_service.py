@@ -305,6 +305,23 @@ def _check_image_quality(file_url: str, analysis: ImageAnalysis | None = None) -
     return ImageQualityResult(readable=not issues, issues=issues)
 
 
+def _check_document_quality(file_url: str, file_name: str | None = None) -> ImageQualityResult:
+    """@brief 根据文件地址生成 PDF 等非图片材料的可读性预检。
+
+    @param file_url 材料文件地址。
+    @param file_name 原始文件名。
+    @return 非图片材料质量检查结果。
+    """
+    file_suffix = _extract_file_suffix(file_url, file_name)
+    lower_text = _normalize_text(file_url, file_name)
+    issues = []
+    if file_suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
+        issues.append("UNSUPPORTED_MATERIAL_FORMAT")
+    if any(keyword in lower_text for keyword in ["blocked", "cover", "occlusion"]):
+        issues.append("OCCLUSION")
+    return ImageQualityResult(readable=not issues, issues=issues)
+
+
 def _extract_file_suffix(file_url: str, file_name: str | None = None) -> str:
     """@brief 提取材料文件后缀。
 
@@ -481,7 +498,8 @@ def _build_preprocess_candidates(request: MaterialPreprocessRequest) -> list[Mat
         file_name=request.file_name,
         material_type_hint=request.material_type_hint,
     )
-    analysis = analyze_image(request.file_url)
+    file_suffix = _extract_file_suffix(request.file_url, request.file_name)
+    analysis = None if file_suffix in SUPPORTED_DOCUMENT_SUFFIXES else analyze_image(request.file_url)
     return _build_material_candidates(image_request, analysis)
 
 
@@ -677,8 +695,9 @@ def _build_classified_application_materials(
             file_name=item.file_name,
             material_type_hint=item.material_type_hint or item.uploaded_category_code,
         )
-        analysis = analyze_image(item.file_url)
-        quality = _check_image_quality(item.file_url, analysis)
+        file_suffix = _extract_file_suffix(item.file_url, item.file_name)
+        analysis = None if file_suffix in SUPPORTED_DOCUMENT_SUFFIXES else analyze_image(item.file_url)
+        quality = _check_document_quality(item.file_url, item.file_name) if file_suffix in SUPPORTED_DOCUMENT_SUFFIXES else _check_image_quality(item.file_url, analysis)
         candidates = _build_material_candidates(image_request, analysis)
         best_candidate = candidates[0]
         suggested_action, need_manual_review = _decide_classify_action(best_candidate.confidence, quality)
@@ -1036,7 +1055,7 @@ def audit_application_materials(request: ApplicationMaterialAuditRequest) -> dic
     for item in request.materials:
         if not item.file_url.strip():
             return _fail(400, "材料文件地址不能为空")
-        if not item.file_url.lower().endswith(SUPPORTED_IMAGE_SUFFIXES):
+        if _extract_file_suffix(item.file_url, item.file_name) not in SUPPORTED_MATERIAL_SUFFIXES:
             return _fail(415, "文件格式不支持")
 
     required_categories = _get_required_categories(request.application_type)

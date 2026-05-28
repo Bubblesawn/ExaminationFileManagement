@@ -47,6 +47,14 @@ public interface AiAssistService {
     AlgorithmResponseVO auditApplicationMaterials(ApplicationMaterialAuditDTO dto);
 
     /**
+     * @brief 根据业务申请 ID 自动组装材料并调用算法服务申请材料智能核验接口。
+     *
+     * @param applicationId 业务申请 ID。
+     * @return 算法服务响应。
+     */
+    AlgorithmResponseVO auditApplicationMaterialsByApplicationId(Long applicationId);
+
+    /**
      * @brief 调用算法服务目标检测接口。
      *
      * @param dto 图片任务请求对象。

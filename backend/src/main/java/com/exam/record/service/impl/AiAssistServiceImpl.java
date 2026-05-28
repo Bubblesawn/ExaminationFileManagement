@@ -1,11 +1,18 @@
 package com.exam.record.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.exam.record.common.BusinessException;
 import com.exam.record.dto.AiChatDTO;
 import com.exam.record.dto.AiImageTaskDTO;
 import com.exam.record.dto.AiSpeechDTO;
 import com.exam.record.dto.ApplicationMaterialAuditDTO;
 import com.exam.record.dto.MaterialPreprocessDTO;
+import com.exam.record.entity.BusinessApplication;
+import com.exam.record.entity.RecordMaterial;
+import com.exam.record.mapper.BusinessApplicationMapper;
+import com.exam.record.mapper.RecordMaterialMapper;
 import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
@@ -23,9 +30,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * @brief 智能辅助调用服务实现。
@@ -41,8 +52,13 @@ public class AiAssistServiceImpl implements AiAssistService {
     private static final long MAX_MATERIAL_FILE_SIZE = 10 * 1024 * 1024;
     private static final Set<String> SUPPORTED_MATERIAL_SUFFIXES = Set.of("jpg", "jpeg", "png", "bmp", "webp");
     private static final DateTimeFormatter UPLOAD_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final TypeReference<List<Long>> MATERIAL_ID_LIST_TYPE = new TypeReference<>() {
+    };
 
     private final RestTemplate restTemplate;
+    private final BusinessApplicationMapper businessApplicationMapper;
+    private final RecordMaterialMapper recordMaterialMapper;
+    private final ObjectMapper objectMapper;
     private final String algorithmBaseUrl;
     private final String algorithmApiKey;
     private final Path uploadRootPath;
@@ -56,10 +72,16 @@ public class AiAssistServiceImpl implements AiAssistService {
      */
     public AiAssistServiceImpl(
             RestTemplate restTemplate,
+            BusinessApplicationMapper businessApplicationMapper,
+            RecordMaterialMapper recordMaterialMapper,
+            ObjectMapper objectMapper,
             @Value("${algorithm.service.base-url}") String algorithmBaseUrl,
             @Value("${algorithm.service.api-key}") String algorithmApiKey,
             @Value("${material.upload.root:uploads/materials}") String uploadRoot) {
         this.restTemplate = restTemplate;
+        this.businessApplicationMapper = businessApplicationMapper;
+        this.recordMaterialMapper = recordMaterialMapper;
+        this.objectMapper = objectMapper;
         this.algorithmBaseUrl = trimTrailingSlash(algorithmBaseUrl);
         this.algorithmApiKey = algorithmApiKey;
         this.uploadRootPath = Path.of(uploadRoot).toAbsolutePath().normalize();
@@ -144,6 +166,30 @@ public class AiAssistServiceImpl implements AiAssistService {
     @Override
     public AlgorithmResponseVO auditApplicationMaterials(ApplicationMaterialAuditDTO dto) {
         return callAlgorithm("/application-material-audit", dto, "申请材料核验", dto.getBusinessId(), dto.getApplicationType());
+    }
+
+    /**
+     * @brief 根据业务申请 ID 自动组装材料并调用算法服务申请材料智能核验接口。
+     *
+     * @details
+     * 从通用业务申请中读取申请类型、申请人和材料 ID 列表，再反查 record_material
+     * 中的文件地址、原始文件名、登记材料类型等信息，形成算法服务核验请求。
+     *
+     * @param applicationId 业务申请 ID。
+     * @return 算法服务响应。
+     */
+    @Override
+    public AlgorithmResponseVO auditApplicationMaterialsByApplicationId(Long applicationId) {
+        BusinessApplication application = businessApplicationMapper.selectById(applicationId);
+        if (application == null) {
+            throw new BusinessException(404, "业务申请不存在");
+        }
+        ApplicationMaterialAuditDTO dto = new ApplicationMaterialAuditDTO();
+        dto.setBusinessId(application.getId());
+        dto.setApplicationType(application.getBusinessType());
+        dto.setApplicantName(application.getApplyUserName());
+        dto.setMaterials(buildApplicationMaterialItems(application));
+        return auditApplicationMaterials(dto);
     }
 
     /**
@@ -255,6 +301,67 @@ public class AiAssistServiceImpl implements AiAssistService {
         HttpHeaders headers = new HttpHeaders();
         headers.set(ALGORITHM_API_KEY_HEADER, algorithmApiKey);
         return headers;
+    }
+
+    /**
+     * @brief 构造业务申请材料核验明细。
+     *
+     * @param application 业务申请实体。
+     * @return 算法服务申请材料明细列表。
+     */
+    private List<ApplicationMaterialAuditDTO.ApplicationMaterialItemDTO> buildApplicationMaterialItems(BusinessApplication application) {
+        List<Long> materialIds = readMaterialIds(application);
+        if (materialIds.isEmpty()) {
+            return List.of();
+        }
+        List<RecordMaterial> materials = recordMaterialMapper.selectList(new LambdaQueryWrapper<RecordMaterial>()
+                .eq(RecordMaterial::getRecordId, application.getRecordId())
+                .in(RecordMaterial::getId, materialIds));
+        if (materials.size() != materialIds.size()) {
+            throw new BusinessException(400, "申请材料不存在或不属于当前考籍档案");
+        }
+        Map<Long, RecordMaterial> materialMap = materials.stream()
+                .collect(Collectors.toMap(RecordMaterial::getId, Function.identity()));
+        return materialIds.stream()
+                .map(materialMap::get)
+                .map(this::toApplicationMaterialItem)
+                .toList();
+    }
+
+    /**
+     * @brief 将档案材料实体转换为算法服务核验单项材料。
+     *
+     * @param material 档案材料实体。
+     * @return 申请材料核验单项请求。
+     */
+    private ApplicationMaterialAuditDTO.ApplicationMaterialItemDTO toApplicationMaterialItem(RecordMaterial material) {
+        ApplicationMaterialAuditDTO.ApplicationMaterialItemDTO item = new ApplicationMaterialAuditDTO.ApplicationMaterialItemDTO();
+        item.setMaterialId(material.getId());
+        item.setFileUrl(material.getPreviewUrl() == null ? material.getFileUrl() : material.getPreviewUrl());
+        item.setFileName(material.getOriginalFileName());
+        item.setMaterialTypeHint(material.getMaterialType());
+        item.setUploadedCategoryCode(material.getMaterialType());
+        return item;
+    }
+
+    /**
+     * @brief 读取业务申请中的材料 ID 列表。
+     *
+     * @param application 业务申请实体。
+     * @return 去重后的材料 ID 列表，保持原始提交顺序。
+     */
+    private List<Long> readMaterialIds(BusinessApplication application) {
+        if (application.getMaterialIdsJson() == null || application.getMaterialIdsJson().isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(application.getMaterialIdsJson(), MATERIAL_ID_LIST_TYPE).stream()
+                    .filter(id -> id != null && id > 0)
+                    .distinct()
+                    .toList();
+        } catch (IOException exception) {
+            throw new BusinessException(500, "申请材料读取失败：" + exception.getMessage());
+        }
     }
 
     /**

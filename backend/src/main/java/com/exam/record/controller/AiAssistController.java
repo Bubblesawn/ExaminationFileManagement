@@ -10,6 +10,7 @@ import com.exam.record.service.AiAssistService;
 import com.exam.record.vo.AlgorithmResponseVO;
 import com.exam.record.vo.MaterialUploadVO;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -79,6 +80,21 @@ public class AiAssistController {
     @PostMapping("/application-material-audit")
     public Result<AlgorithmResponseVO> auditApplicationMaterials(@Valid @RequestBody ApplicationMaterialAuditDTO dto) {
         return Result.success(aiAssistService.auditApplicationMaterials(dto));
+    }
+
+    /**
+     * @brief 按业务申请 ID 调用申请材料智能核验能力。
+     *
+     * @details
+     * 后端根据 business_application.material_ids_json 自动加载已绑定材料，
+     * 组装材料访问地址、文件名和登记类别后再调用算法服务，避免前端重复拼装材料明细。
+     *
+     * @param applicationId 业务申请 ID。
+     * @return 申请材料分类、缺失项和异常提醒算法响应。
+     */
+    @PostMapping("/applications/{applicationId}/material-audit")
+    public Result<AlgorithmResponseVO> auditApplicationMaterialsByApplicationId(@PathVariable Long applicationId) {
+        return Result.success(aiAssistService.auditApplicationMaterialsByApplicationId(applicationId));
     }
 
     /**
