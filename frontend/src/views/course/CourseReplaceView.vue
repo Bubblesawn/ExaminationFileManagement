@@ -311,10 +311,18 @@
             <span class="timeline-operator">经办人：{{ record.auditorName || '-' }}</span>
           </el-timeline-item>
         </el-timeline>
+
+        <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
 
-    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="520px">
+    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="880px">
+      <ApplicationMaterialAuditPanel
+        v-if="selectedApplication"
+        :application-id="selectedApplication.id"
+        title="审核前智能核验"
+        description="审核课程顶替申请前，查看材料分类、缺失项和异常风险。"
+      />
       <el-form :model="auditForm" label-width="90px">
         <el-form-item label="审核意见">
           <el-input v-model="auditForm.auditOpinion" type="textarea" :rows="4" maxlength="512" show-word-limit />
@@ -356,6 +364,7 @@ import {
   SwitchButton,
   View
 } from '@element-plus/icons-vue'
+import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import {
   approveCourseReplacementApplication,
   createCourseReplacementRule,

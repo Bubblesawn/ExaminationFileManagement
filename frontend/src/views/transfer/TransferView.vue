@@ -200,10 +200,18 @@
             <p class="flow-opinion">{{ record.auditOpinion || '-' }}</p>
           </el-timeline-item>
         </el-timeline>
+
+        <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
 
-    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="520px">
+    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="880px">
+      <ApplicationMaterialAuditPanel
+        v-if="selectedApplication"
+        :application-id="selectedApplication.id"
+        title="审核前智能核验"
+        description="审核转考申请前，查看材料完整性和异常材料提醒。"
+      />
       <el-form :model="auditForm" label-width="90px">
         <el-form-item label="审核意见">
           <el-input v-model="auditForm.auditOpinion" type="textarea" :rows="4" maxlength="512" show-word-limit />
@@ -234,6 +242,7 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
+import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import {
   approveTransferApplication,
   getTransferApplicationDetail,

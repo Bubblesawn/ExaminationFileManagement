@@ -244,6 +244,8 @@
             <p class="timeline-meta">操作人：{{ record.auditorName || '-' }}</p>
           </el-timeline-item>
         </el-timeline>
+
+        <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
 
@@ -270,7 +272,7 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="520px">
+    <el-dialog v-model="auditDialogVisible" :title="auditMode === 'approve' ? '审核通过' : '审核驳回'" width="880px">
       <el-alert
         v-if="selectedApplication"
         class="audit-summary"
@@ -279,6 +281,12 @@
         :description="selectedApplication.eligibilitySummary || '审核通过时后端会再次执行资格校验。'"
         show-icon
         :closable="false"
+      />
+      <ApplicationMaterialAuditPanel
+        v-if="selectedApplication"
+        :application-id="selectedApplication.id"
+        title="审核前智能核验"
+        description="结合毕业资格校验，查看申请材料缺失项和异常风险。"
       />
       <el-form :model="auditForm" label-width="90px">
         <el-form-item label="审核意见">
@@ -310,6 +318,7 @@ import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, DocumentChecked, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
+import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import {
   approveGraduationApplication,
   checkGraduationEligibility,
