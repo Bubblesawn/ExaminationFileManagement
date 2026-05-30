@@ -243,11 +243,49 @@
       size="720px"
     >
       <el-form ref="applicationFormRef" :model="applicationForm" :rules="applicationFormRules" label-width="112px">
-        <el-form-item v-if="applicationFormMode === 'create'" label="考籍档案ID" prop="recordId">
-          <el-input-number v-model="applicationForm.recordId" :min="1" controls-position="right" />
+        <el-form-item v-if="applicationFormMode === 'create'" label="考籍档案" prop="recordId">
+          <el-select
+            v-model="applicationForm.recordId"
+            class="full-select"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchStudentRecords"
+            :loading="recordLoading"
+            placeholder="输入考籍号、姓名或身份证号搜索"
+            @change="handleRecordChange"
+            @visible-change="handleRecordSelectVisible"
+          >
+            <el-option
+              v-for="record in recordOptions"
+              :key="record.id"
+              :label="formatRecordOption(record)"
+              :value="record.id"
+            />
+          </el-select>
         </el-form-item>
-        <el-form-item label="顶替规则ID" prop="ruleId">
-          <el-input-number v-model="applicationForm.ruleId" :min="1" controls-position="right" />
+        <el-form-item label="顶替规则" prop="ruleId">
+          <el-select
+            v-model="applicationForm.ruleId"
+            class="rule-select"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchReplacementRules"
+            :loading="ruleSelectLoading"
+            placeholder="输入课程代码、课程名称或专业代码搜索"
+            @change="handleRuleChange"
+            @visible-change="handleRuleSelectVisible"
+          >
+            <el-option
+              v-for="rule in ruleOptions"
+              :key="rule.id"
+              :label="formatRuleOption(rule)"
+              :value="rule.id"
+            />
+          </el-select>
           <el-button class="inline-action" :icon="View" @click="previewSelectedRule">查看规则</el-button>
         </el-form-item>
         <el-alert
@@ -261,8 +299,25 @@
         <el-form-item label="申请原因">
           <el-input v-model="applicationForm.applyReason" type="textarea" :rows="4" maxlength="512" show-word-limit />
         </el-form-item>
-        <el-form-item label="材料ID">
-          <el-input v-model="materialIdsText" placeholder="多个材料ID用英文逗号分隔" />
+        <el-form-item label="申请材料">
+          <el-select
+            v-model="selectedMaterialIds"
+            class="full-select"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="!applicationForm.recordId"
+            :loading="materialLoading"
+            :placeholder="applicationForm.recordId ? '请选择当前档案材料' : '请先选择考籍档案'"
+          >
+            <el-option
+              v-for="material in materialOptions"
+              :key="material.id"
+              :label="formatMaterialOption(material)"
+              :value="material.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="applicationForm.remark" type="textarea" :rows="3" maxlength="512" show-word-limit />
@@ -290,7 +345,7 @@
           <el-descriptions-item label="适用专业">{{ selectedApplication.majorCode || '通用' }}</el-descriptions-item>
           <el-descriptions-item label="学历层次">{{ educationLevelText(selectedApplication.educationLevel) }}</el-descriptions-item>
           <el-descriptions-item label="申请原因" :span="2">{{ selectedApplication.applyReason || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="材料ID" :span="2">
+          <el-descriptions-item label="申请材料" :span="2">
             {{ (selectedApplication.materialIds || []).join(', ') || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="审核意见" :span="2">
@@ -367,6 +422,8 @@ import {
 } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import BusinessMaterialList from '../../components/material/BusinessMaterialList.vue'
+import { listRecordMaterials, type RecordMaterial } from '../../api/material'
+import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   approveCourseReplacementApplication,
   createCourseReplacementRule,
@@ -390,8 +447,14 @@ const activeTab = ref<'rules' | 'applications'>('rules')
 const ruleLoading = ref(false)
 const applicationLoading = ref(false)
 const saving = ref(false)
+const recordLoading = ref(false)
+const materialLoading = ref(false)
+const ruleSelectLoading = ref(false)
 const rules = ref<CourseReplacementRule[]>([])
 const applications = ref<CourseReplacementApplication[]>([])
+const recordOptions = ref<StudentRecord[]>([])
+const materialOptions = ref<RecordMaterial[]>([])
+const ruleOptions = ref<CourseReplacementRule[]>([])
 const ruleTotal = ref(0)
 const applicationTotal = ref(0)
 const ruleDrawerVisible = ref(false)
@@ -407,7 +470,7 @@ const selectedRule = ref<CourseReplacementRule | null>(null)
 const flowRecords = ref<CourseReplacementFlowRecord[]>([])
 const ruleFormRef = ref<FormInstance>()
 const applicationFormRef = ref<FormInstance>()
-const materialIdsText = ref('')
+const selectedMaterialIds = ref<number[]>([])
 
 const ruleQuery = reactive({
   pageNo: 1,
@@ -461,8 +524,8 @@ const ruleFormRules: FormRules = {
 }
 
 const applicationFormRules: FormRules = {
-  recordId: [{ required: true, message: '请输入考籍档案ID', trigger: 'blur' }],
-  ruleId: [{ required: true, message: '请输入顶替规则ID', trigger: 'blur' }]
+  recordId: [{ required: true, message: '请选择考籍档案', trigger: 'change' }],
+  ruleId: [{ required: true, message: '请选择顶替规则', trigger: 'change' }]
 }
 
 const selectedRuleSummary = computed(() => {
@@ -576,9 +639,19 @@ async function openApplicationDrawer(mode: 'create' | 'edit', row?: CourseReplac
     applyReason: selectedApplication.value?.applyReason ?? '',
     remark: selectedApplication.value?.remark ?? ''
   })
-  materialIdsText.value = (selectedApplication.value?.materialIds ?? []).join(',')
+  if (mode === 'create') {
+    recordOptions.value = []
+    selectedMaterialIds.value = []
+    materialOptions.value = []
+    searchStudentRecords('')
+  } else {
+    selectedMaterialIds.value = [...(selectedApplication.value?.materialIds ?? [])]
+    await loadRecordMaterials(selectedApplication.value?.recordId)
+  }
   if (applicationForm.ruleId) {
     await loadSelectedRule(applicationForm.ruleId, false)
+  } else {
+    searchReplacementRules('')
   }
   applicationDrawerVisible.value = true
 }
@@ -592,7 +665,7 @@ async function useRuleForApplication(rule: CourseReplacementRule) {
 
 async function previewSelectedRule() {
   if (!applicationForm.ruleId) {
-    ElMessage.warning('请先输入顶替规则ID')
+    ElMessage.warning('请先选择顶替规则')
     return
   }
   await loadSelectedRule(applicationForm.ruleId, true)
@@ -600,6 +673,9 @@ async function previewSelectedRule() {
 
 async function loadSelectedRule(ruleId: number, showMessage: boolean) {
   selectedRule.value = await getCourseReplacementRuleDetail(ruleId)
+  if (!ruleOptions.value.some((rule) => rule.id === selectedRule.value?.id)) {
+    ruleOptions.value = selectedRule.value ? [selectedRule.value, ...ruleOptions.value] : ruleOptions.value
+  }
   if (showMessage) {
     ElMessage.success('规则信息已加载')
   }
@@ -662,7 +738,7 @@ async function submitApplicationForm() {
       recordId: applicationForm.recordId,
       ruleId: applicationForm.ruleId,
       applyReason: applicationForm.applyReason || undefined,
-      materialIds: parseMaterialIds(),
+      materialIds: selectedMaterialIds.value,
       remark: applicationForm.remark || undefined
     }
     if (applicationFormMode.value === 'create') {
@@ -738,14 +814,140 @@ async function submitWithdraw() {
   }
 }
 
-function parseMaterialIds() {
-  if (!materialIdsText.value.trim()) {
-    return []
+/**
+ * @brief 远程搜索可办理课程顶替业务的考籍档案。
+ *
+ * @param keyword 考籍号、考生姓名或身份证号关键字。
+ */
+async function searchStudentRecords(keyword: string) {
+  recordLoading.value = true
+  try {
+    const result = await pageStudentRecords({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      recordStatus: 'NORMAL',
+      archiveStatus: 'UNARCHIVED'
+    })
+    recordOptions.value = result.records ?? []
+  } finally {
+    recordLoading.value = false
   }
-  return materialIdsText.value
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isFinite(item) && item > 0)
+}
+
+/**
+ * @brief 远程搜索启用的课程顶替规则。
+ *
+ * @param keyword 课程代码、课程名称或专业代码关键字。
+ */
+async function searchReplacementRules(keyword: string) {
+  ruleSelectLoading.value = true
+  try {
+    const result = await pageCourseReplacementRules({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      ruleStatus: 'ENABLED'
+    })
+    ruleOptions.value = result.records ?? []
+  } finally {
+    ruleSelectLoading.value = false
+  }
+}
+
+/**
+ * @brief 首次展开考籍档案下拉框时加载可选档案。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRecordSelectVisible(visible: boolean) {
+  if (visible && recordOptions.value.length === 0) {
+    searchStudentRecords('')
+  }
+}
+
+/**
+ * @brief 首次展开规则下拉框时加载可选规则。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRuleSelectVisible(visible: boolean) {
+  if (visible && ruleOptions.value.length === 0) {
+    searchReplacementRules('')
+  }
+}
+
+/**
+ * @brief 切换考籍档案后加载该档案材料并清空旧选择。
+ *
+ * @param recordId 当前选中的考籍档案主键。
+ */
+async function handleRecordChange(recordId?: number) {
+  selectedMaterialIds.value = []
+  await loadRecordMaterials(recordId)
+}
+
+/**
+ * @brief 切换课程顶替规则后加载规则摘要。
+ *
+ * @param ruleId 当前选中的规则主键。
+ */
+async function handleRuleChange(ruleId?: number) {
+  selectedRule.value = null
+  if (ruleId) {
+    await loadSelectedRule(ruleId, false)
+  }
+}
+
+/**
+ * @brief 加载指定考籍档案的材料列表。
+ *
+ * @param recordId 考籍档案主键。
+ */
+async function loadRecordMaterials(recordId?: number) {
+  if (!recordId) {
+    materialOptions.value = []
+    return
+  }
+  materialLoading.value = true
+  try {
+    materialOptions.value = await listRecordMaterials({ recordId })
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+/**
+ * @brief 格式化考籍档案选项。
+ *
+ * @param record 考籍档案摘要。
+ * @return 下拉框展示文本。
+ */
+function formatRecordOption(record: StudentRecord) {
+  const idCard = record.idCard ? ` / ${record.idCard}` : ''
+  const majorName = record.majorName ? ` / ${record.majorName}` : ''
+  return `${record.recordNo} / ${record.candidateName || '未知考生'}${idCard}${majorName}`
+}
+
+/**
+ * @brief 格式化课程顶替规则选项。
+ *
+ * @param rule 课程顶替规则摘要。
+ * @return 下拉框展示文本。
+ */
+function formatRuleOption(rule: CourseReplacementRule) {
+  return `${courseLabel(rule.sourceCourseCode, rule.sourceCourseName)} -> ${courseLabel(rule.targetCourseCode, rule.targetCourseName)} / ${rule.majorCode || '通用'}`
+}
+
+/**
+ * @brief 格式化材料选项。
+ *
+ * @param material 档案材料摘要。
+ * @return 下拉框展示文本。
+ */
+function formatMaterialOption(material: RecordMaterial) {
+  const fileName = material.originalFileName || material.fileName || `材料${material.id}`
+  return `${material.materialType} / ${fileName} / ${auditStatusText(material.auditStatus)}`
 }
 
 function courseLabel(code?: string, name?: string) {
@@ -792,6 +994,15 @@ function applicationStatusTag(status?: string) {
   if (status === 'REJECTED') return 'danger'
   if (status === 'WITHDRAWN') return 'info'
   return 'warning'
+}
+
+function auditStatusText(status?: string) {
+  const statusMap: Record<string, string> = {
+    PENDING: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回'
+  }
+  return statusMap[status || ''] || status || '-'
 }
 
 function flowActionText(action?: string) {
@@ -859,6 +1070,14 @@ onMounted(() => {
 
 .query-form :deep(.el-select) {
   width: 180px;
+}
+
+.full-select {
+  width: 100%;
+}
+
+.rule-select {
+  width: calc(100% - 96px);
 }
 
 .pagination-wrapper {

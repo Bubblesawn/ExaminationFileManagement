@@ -125,17 +125,36 @@
 
     <el-drawer v-model="formDrawerVisible" :title="formMode === 'create' ? '新增毕业申请' : '编辑毕业申请'" size="720px">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
-        <el-form-item v-if="formMode === 'create'" label="考籍档案ID" prop="recordId">
+        <el-form-item v-if="formMode === 'create'" label="考籍档案" prop="recordId">
           <div class="record-check-field">
-            <el-input-number v-model="form.recordId" :min="1" controls-position="right" @change="clearEligibility" />
+            <el-select
+              v-model="form.recordId"
+              class="record-select"
+              filterable
+              remote
+              clearable
+              reserve-keyword
+              :remote-method="searchStudentRecords"
+              :loading="recordLoading"
+              placeholder="输入考籍号、姓名或身份证号搜索"
+              @change="handleRecordChange"
+              @visible-change="handleRecordSelectVisible"
+            >
+              <el-option
+                v-for="record in recordOptions"
+                :key="record.id"
+                :label="formatRecordOption(record)"
+                :value="record.id"
+              />
+            </el-select>
             <el-button :icon="CircleCheck" :loading="checkingEligibility" @click="handleEligibilityCheck">
               资格校验
             </el-button>
           </div>
         </el-form-item>
-        <el-form-item v-else label="考籍档案ID">
+        <el-form-item v-else label="考籍档案">
           <div class="record-check-field">
-            <el-input-number v-model="form.recordId" :min="1" controls-position="right" disabled />
+            <el-input v-model="selectedRecordLabel" disabled />
             <el-button :icon="CircleCheck" :loading="checkingEligibility" @click="handleEligibilityCheck">
               重新校验
             </el-button>
@@ -154,8 +173,25 @@
         <el-form-item label="申请原因" prop="applyReason">
           <el-input v-model="form.applyReason" type="textarea" :rows="4" maxlength="512" show-word-limit />
         </el-form-item>
-        <el-form-item label="材料ID">
-          <el-input v-model="materialIdsText" placeholder="多个材料ID用英文逗号分隔" />
+        <el-form-item label="申请材料">
+          <el-select
+            v-model="selectedMaterialIds"
+            class="material-select"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="!form.recordId"
+            :loading="materialLoading"
+            :placeholder="form.recordId ? '请选择当前档案材料' : '请先选择考籍档案'"
+          >
+            <el-option
+              v-for="material in materialOptions"
+              :key="material.id"
+              :label="formatMaterialOption(material)"
+              :value="material.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="3" maxlength="512" show-word-limit />
@@ -202,13 +238,13 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="申请编号">{{ selectedApplication.applicationNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ applicationStatusText(selectedApplication.applicationStatus) }}</el-descriptions-item>
-          <el-descriptions-item label="考籍档案ID">{{ selectedApplication.recordId }}</el-descriptions-item>
+          <el-descriptions-item label="考籍档案">{{ selectedApplication.recordNo || selectedApplication.recordId }}</el-descriptions-item>
           <el-descriptions-item label="考生姓名">{{ selectedApplication.candidateName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="考籍号">{{ selectedApplication.recordNo || '-' }}</el-descriptions-item>
           <el-descriptions-item label="专业">{{ selectedApplication.majorName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="毕业批次">{{ selectedApplication.graduationBatch || '-' }}</el-descriptions-item>
           <el-descriptions-item label="学位类型">{{ degreeApplyTypeText(selectedApplication.degreeApplyType) }}</el-descriptions-item>
-          <el-descriptions-item label="申请材料ID">
+          <el-descriptions-item label="申请材料">
             {{ selectedApplication.materialIds?.length ? selectedApplication.materialIds.join('、') : '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="资格校验" :span="2">
@@ -321,6 +357,8 @@ import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, DocumentChecked, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import BusinessMaterialList from '../../components/material/BusinessMaterialList.vue'
+import { listRecordMaterials, type RecordMaterial } from '../../api/material'
+import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   approveGraduationApplication,
   checkGraduationEligibility,
@@ -340,7 +378,11 @@ import {
 const loading = ref(false)
 const saving = ref(false)
 const checkingEligibility = ref(false)
+const recordLoading = ref(false)
+const materialLoading = ref(false)
 const applications = ref<GraduationApplication[]>([])
+const recordOptions = ref<StudentRecord[]>([])
+const materialOptions = ref<RecordMaterial[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
 const detailDrawerVisible = ref(false)
@@ -354,7 +396,8 @@ const resultApplication = ref<GraduationApplication | null>(null)
 const eligibility = ref<GraduationEligibility | null>(null)
 const flowRecords = ref<GraduationFlowRecord[]>([])
 const formRef = ref<FormInstance>()
-const materialIdsText = ref('')
+const selectedMaterialIds = ref<number[]>([])
+const selectedRecordLabel = ref('')
 
 const query = reactive({
   pageNo: 1,
@@ -381,7 +424,7 @@ const withdrawForm = reactive({
 })
 
 const formRules: FormRules = {
-  recordId: [{ required: true, message: '请输入考籍档案ID', trigger: 'blur' }],
+  recordId: [{ required: true, message: '请选择考籍档案', trigger: 'change' }],
   graduationBatch: [{ required: true, message: '请输入毕业批次', trigger: 'blur' }],
   applyReason: [{ required: true, message: '请输入申请原因', trigger: 'blur' }]
 }
@@ -429,8 +472,12 @@ function openCreateDrawer() {
     applyReason: '',
     remark: ''
   })
-  materialIdsText.value = ''
+  selectedRecordLabel.value = ''
+  recordOptions.value = []
+  selectedMaterialIds.value = []
+  materialOptions.value = []
   formDrawerVisible.value = true
+  searchStudentRecords('')
 }
 
 async function openEditDrawer(row: GraduationApplication) {
@@ -445,7 +492,9 @@ async function openEditDrawer(row: GraduationApplication) {
     applyReason: selectedApplication.value.applyReason || '',
     remark: selectedApplication.value.remark || ''
   })
-  materialIdsText.value = (selectedApplication.value.materialIds || []).join(',')
+  selectedRecordLabel.value = formatApplicationRecordLabel(selectedApplication.value)
+  selectedMaterialIds.value = [...(selectedApplication.value.materialIds || [])]
+  await loadRecordMaterials(selectedApplication.value.recordId)
   formDrawerVisible.value = true
 }
 
@@ -478,11 +527,22 @@ function clearEligibility() {
 }
 
 /**
- * @brief 根据考籍档案ID执行毕业资格校验，并将通过项、未通过项和提醒项展示在申请表单中。
+ * @brief 切换考籍档案后清空资格校验结果并加载该档案材料。
+ *
+ * @param recordId 当前选中的考籍档案主键。
+ */
+async function handleRecordChange(recordId?: number) {
+  clearEligibility()
+  selectedMaterialIds.value = []
+  await loadRecordMaterials(recordId)
+}
+
+/**
+ * @brief 根据已选考籍档案执行毕业资格校验，并将通过项、未通过项和提醒项展示在申请表单中。
  */
 async function handleEligibilityCheck() {
   if (!form.recordId) {
-    ElMessage.warning('请先输入考籍档案ID')
+    ElMessage.warning('请先选择考籍档案')
     return
   }
   checkingEligibility.value = true
@@ -502,7 +562,7 @@ async function submitForm() {
       graduationBatch: form.graduationBatch,
       degreeApplyType: form.degreeApplyType || undefined,
       applyReason: form.applyReason,
-      materialIds: parseMaterialIds(),
+      materialIds: selectedMaterialIds.value,
       remark: form.remark || undefined
     }
     if (formMode.value === 'create') {
@@ -556,14 +616,88 @@ async function submitWithdraw() {
   }
 }
 
-function parseMaterialIds() {
-  if (!materialIdsText.value.trim()) {
-    return []
+/**
+ * @brief 远程搜索可办理毕业申请的考籍档案。
+ *
+ * @param keyword 考籍号、考生姓名或身份证号关键字。
+ */
+async function searchStudentRecords(keyword: string) {
+  recordLoading.value = true
+  try {
+    const result = await pageStudentRecords({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      recordStatus: 'NORMAL',
+      archiveStatus: 'UNARCHIVED'
+    })
+    recordOptions.value = result.records ?? []
+  } finally {
+    recordLoading.value = false
   }
-  return materialIdsText.value
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isFinite(item) && item > 0)
+}
+
+/**
+ * @brief 首次展开考籍档案下拉框时加载可选档案。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRecordSelectVisible(visible: boolean) {
+  if (visible && recordOptions.value.length === 0) {
+    searchStudentRecords('')
+  }
+}
+
+/**
+ * @brief 加载指定考籍档案的材料列表。
+ *
+ * @param recordId 考籍档案主键。
+ */
+async function loadRecordMaterials(recordId?: number) {
+  if (!recordId) {
+    materialOptions.value = []
+    return
+  }
+  materialLoading.value = true
+  try {
+    materialOptions.value = await listRecordMaterials({ recordId })
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+/**
+ * @brief 格式化考籍档案选项。
+ *
+ * @param record 考籍档案摘要。
+ * @return 下拉框展示文本。
+ */
+function formatRecordOption(record: StudentRecord) {
+  const idCard = record.idCard ? ` / ${record.idCard}` : ''
+  const majorName = record.majorName ? ` / ${record.majorName}` : ''
+  return `${record.recordNo} / ${record.candidateName || '未知考生'}${idCard}${majorName}`
+}
+
+/**
+ * @brief 格式化毕业申请详情中的考籍档案标签。
+ *
+ * @param application 毕业申请详情。
+ * @return 已选考籍档案展示文本。
+ */
+function formatApplicationRecordLabel(application: GraduationApplication) {
+  const majorName = application.majorName ? ` / ${application.majorName}` : ''
+  return `${application.recordNo || application.recordId} / ${application.candidateName || '未知考生'}${majorName}`
+}
+
+/**
+ * @brief 格式化材料选项。
+ *
+ * @param material 档案材料摘要。
+ * @return 下拉框展示文本。
+ */
+function formatMaterialOption(material: RecordMaterial) {
+  const fileName = material.originalFileName || material.fileName || `材料${material.id}`
+  return `${material.materialType} / ${fileName} / ${auditStatusText(material.auditStatus)}`
 }
 
 function degreeApplyTypeText(type?: string) {
@@ -591,6 +725,15 @@ function applicationStatusTag(status?: string) {
   if (status === 'REJECTED') return 'danger'
   if (status === 'WITHDRAWN') return 'info'
   return 'warning'
+}
+
+function auditStatusText(status?: string) {
+  const statusMap: Record<string, string> = {
+    PENDING: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回'
+  }
+  return statusMap[status || ''] || status || '-'
 }
 
 function flowActionText(action?: string) {
@@ -653,6 +796,14 @@ onMounted(loadApplications)
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.record-select {
+  flex: 1 1 420px;
+}
+
+.material-select {
+  width: 100%;
 }
 
 .eligibility-alert {

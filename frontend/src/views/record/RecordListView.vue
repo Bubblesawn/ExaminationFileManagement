@@ -5,6 +5,7 @@
         <h2 class="page-title">考籍档案</h2>
         <p class="page-subtitle">维护考籍档案列表，并为选中档案上传、预览、下载和删除材料。</p>
       </div>
+      <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建档案</el-button>
     </div>
 
     <el-card shadow="never" class="query-card">
@@ -19,9 +20,11 @@
         </el-form-item>
         <el-form-item label="考籍状态">
           <el-select v-model="query.recordStatus" clearable placeholder="全部">
-            <el-option label="在籍" value="ACTIVE" />
+            <el-option label="正常" value="NORMAL" />
             <el-option label="暂停" value="SUSPENDED" />
             <el-option label="注销" value="CANCELLED" />
+            <el-option label="已转出" value="TRANSFERRED_OUT" />
+            <el-option label="已毕业" value="GRADUATED" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -107,24 +110,99 @@
         />
       </template>
     </el-drawer>
+
+    <el-dialog v-model="createDialogVisible" title="新建考籍档案" width="720px" destroy-on-close>
+      <el-form ref="recordFormRef" :model="recordForm" :rules="recordRules" label-width="96px">
+        <div class="form-grid">
+          <el-form-item label="考生" prop="candidateId">
+            <el-select
+              v-model="recordForm.candidateId"
+              filterable
+              remote
+              clearable
+              reserve-keyword
+              :remote-method="searchCandidates"
+              :loading="candidateLoading"
+              placeholder="输入姓名、身份证号或准考证号搜索"
+              @visible-change="handleCandidateSelectVisible"
+              @change="handleCandidateChange"
+            >
+              <el-option
+                v-for="candidate in candidateOptions"
+                :key="candidate.id"
+                :label="formatCandidateOption(candidate)"
+                :value="candidate.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="考籍号" prop="recordNo">
+            <el-input v-model="recordForm.recordNo" maxlength="64" placeholder="请输入考籍号" />
+          </el-form-item>
+          <el-form-item label="注册批次" prop="enrollBatch">
+            <el-input v-model="recordForm.enrollBatch" maxlength="64" placeholder="如：2026年春季" />
+          </el-form-item>
+          <el-form-item label="考籍层次" prop="educationLevel">
+            <el-select v-model="recordForm.educationLevel" clearable placeholder="请选择考籍层次">
+              <el-option label="专科" value="专科" />
+              <el-option label="本科" value="本科" />
+              <el-option label="其他" value="其他" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="专业代码" prop="majorCode">
+            <el-input v-model="recordForm.majorCode" maxlength="64" placeholder="请输入专业代码" />
+          </el-form-item>
+          <el-form-item label="专业名称" prop="majorName">
+            <el-input v-model="recordForm.majorName" maxlength="128" placeholder="请输入专业名称" />
+          </el-form-item>
+          <el-form-item label="考籍状态" prop="recordStatus">
+            <el-select v-model="recordForm.recordStatus" placeholder="请选择考籍状态">
+              <el-option label="正常" value="NORMAL" />
+              <el-option label="暂停" value="SUSPENDED" />
+              <el-option label="注销" value="CANCELLED" />
+              <el-option label="已转出" value="TRANSFERRED_OUT" />
+              <el-option label="已毕业" value="GRADUATED" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="recordForm.remark" type="textarea" maxlength="512" show-word-limit :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitRecord">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { FolderOpened, Refresh, Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import type { UploadFile } from 'element-plus'
+import { FolderOpened, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage, type FormInstance, type FormRules, type UploadFile } from 'element-plus'
 import { recognizeSpeech, synthesizeSpeech, uploadSpeechAudio } from '../../api/ai'
+import { pageCandidates, type Candidate } from '../../api/candidate'
 import MaterialUploadPreview from '../../components/material/MaterialUploadPreview.vue'
-import { pageStudentRecords, type StudentRecord } from '../../api/record'
+import {
+  createStudentRecord,
+  pageStudentRecords,
+  type StudentRecord,
+  type StudentRecordCreatePayload
+} from '../../api/record'
+
+type RecordFormModel = Required<Pick<StudentRecordCreatePayload, 'candidateId' | 'recordNo'>> &
+  Omit<StudentRecordCreatePayload, 'candidateId' | 'recordNo'>
 
 const loading = ref(false)
+const submitting = ref(false)
+const candidateLoading = ref(false)
 const voiceQueryLoading = ref(false)
 const ttsLoading = ref(false)
 const records = ref<StudentRecord[]>([])
+const candidateOptions = ref<Candidate[]>([])
 const selectedRecord = ref<StudentRecord | null>(null)
 const materialDrawerVisible = ref(false)
+const createDialogVisible = ref(false)
 const total = ref(0)
 const voiceQueryText = ref('')
 const lastNoticeText = ref('')
@@ -133,6 +211,7 @@ const recording = ref(false)
 const mediaRecorder = ref<MediaRecorder | null>(null)
 const recordedChunks = ref<BlobPart[]>([])
 const recordingStream = ref<MediaStream | null>(null)
+const recordFormRef = ref<FormInstance>()
 
 const query = reactive({
   pageNo: 1,
@@ -140,6 +219,23 @@ const query = reactive({
   keyword: '',
   recordStatus: ''
 })
+
+const recordForm = reactive<RecordFormModel>({
+  candidateId: undefined as unknown as number,
+  recordNo: '',
+  enrollBatch: '',
+  educationLevel: '',
+  majorCode: '',
+  majorName: '',
+  recordStatus: 'NORMAL',
+  remark: ''
+})
+
+const recordRules: FormRules = {
+  candidateId: [{ required: true, message: '请选择考生', trigger: 'change' }],
+  recordNo: [{ required: true, message: '请输入考籍号', trigger: 'blur' }],
+  recordStatus: [{ required: true, message: '请选择考籍状态', trigger: 'change' }]
+}
 
 /**
  * @brief 加载考籍档案分页列表。
@@ -178,6 +274,120 @@ function resetQuery() {
   query.recordStatus = ''
   voiceQueryText.value = ''
   loadRecords()
+}
+
+/**
+ * @brief 打开新建考籍档案弹窗，并预加载可选考生。
+ */
+function openCreateDialog() {
+  resetRecordForm()
+  createDialogVisible.value = true
+  searchCandidates('')
+}
+
+/**
+ * @brief 重置新建考籍档案表单。
+ */
+function resetRecordForm() {
+  Object.assign(recordForm, {
+    candidateId: undefined,
+    recordNo: '',
+    enrollBatch: '',
+    educationLevel: '',
+    majorCode: '',
+    majorName: '',
+    recordStatus: 'NORMAL',
+    remark: ''
+  })
+  recordFormRef.value?.clearValidate()
+}
+
+/**
+ * @brief 按关键字远程搜索考生，供建档表单选择考生。
+ *
+ * @param keyword 姓名、身份证号或准考证号关键字。
+ */
+async function searchCandidates(keyword: string) {
+  candidateLoading.value = true
+  try {
+    const result = await pageCandidates({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined
+    })
+    candidateOptions.value = result.records ?? []
+  } finally {
+    candidateLoading.value = false
+  }
+}
+
+/**
+ * @brief 首次展开考生下拉框时加载候选考生。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleCandidateSelectVisible(visible: boolean) {
+  if (visible && candidateOptions.value.length === 0) {
+    searchCandidates('')
+  }
+}
+
+/**
+ * @brief 选择考生后用考生基础信息预填档案层次和专业名称。
+ *
+ * @param candidateId 选中的考生ID。
+ */
+function handleCandidateChange(candidateId?: number) {
+  const candidate = candidateOptions.value.find((item) => item.id === candidateId)
+  if (!candidate) return
+
+  if (!recordForm.educationLevel) {
+    recordForm.educationLevel = candidate.educationLevel || ''
+  }
+  if (!recordForm.majorName) {
+    recordForm.majorName = candidate.majorName || ''
+  }
+}
+
+/**
+ * @brief 格式化考生下拉选项，帮助管理人员区分同名考生。
+ *
+ * @param candidate 考生信息。
+ * @return 下拉框展示文本。
+ */
+function formatCandidateOption(candidate: Candidate) {
+  const admissionNo = candidate.admissionNo ? ` / ${candidate.admissionNo}` : ''
+  return `${candidate.name} / ${candidate.idCard}${admissionNo}`
+}
+
+/**
+ * @brief 提交新建考籍档案表单，成功后刷新档案列表。
+ */
+async function submitRecord() {
+  const valid = await recordFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  submitting.value = true
+  try {
+    await createStudentRecord({
+      candidateId: recordForm.candidateId,
+      recordNo: recordForm.recordNo,
+      enrollBatch: recordForm.enrollBatch || undefined,
+      educationLevel: recordForm.educationLevel || undefined,
+      majorCode: recordForm.majorCode || undefined,
+      majorName: recordForm.majorName || undefined,
+      recordStatus: recordForm.recordStatus || undefined,
+      remark: recordForm.remark || undefined
+    })
+    ElMessage.success('考籍档案已新建')
+    createDialogVisible.value = false
+    query.pageNo = 1
+    await loadRecords()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '新建考籍档案失败')
+  } finally {
+    submitting.value = false
+  }
 }
 
 /**
@@ -358,16 +568,17 @@ function handleMaterialChanged() {
 
 function recordStatusText(status?: string) {
   const statusMap: Record<string, string> = {
-    ACTIVE: '在籍',
+    NORMAL: '正常',
     SUSPENDED: '暂停',
     CANCELLED: '注销',
-    ARCHIVED: '已归档'
+    TRANSFERRED_OUT: '已转出',
+    GRADUATED: '已毕业'
   }
   return statusMap[status || ''] || status || '-'
 }
 
 function recordStatusTag(status?: string) {
-  if (status === 'ACTIVE') return 'success'
+  if (status === 'NORMAL') return 'success'
   if (status === 'SUSPENDED') return 'warning'
   if (status === 'CANCELLED') return 'danger'
   return 'info'
@@ -454,6 +665,17 @@ onMounted(loadRecords)
   width: 180px;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.form-grid :deep(.el-select),
+.form-grid :deep(.el-date-editor) {
+  width: 100%;
+}
+
 .voice-query {
   display: flex;
   align-items: center;
@@ -484,6 +706,10 @@ onMounted(loadRecords)
   .page-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
