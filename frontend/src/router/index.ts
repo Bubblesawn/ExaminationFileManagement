@@ -19,7 +19,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'transfers', component: () => import('../views/transfer/TransferView.vue'), meta: { title: '转入转出', permission: 'transfer:view' } },
       { path: 'graduations', component: () => import('../views/graduation/GraduationView.vue'), meta: { title: '毕业管理', permission: 'graduation:view' } },
       { path: 'ai', component: () => import('../views/ai/AiAssistantView.vue'), meta: { title: '智能辅助', permission: 'ai:view' } },
-      { path: 'system', component: () => import('../views/system/SystemView.vue'), meta: { title: '用户管理', permission: 'system:user:view' } },
+      { path: 'system', component: () => import('../views/system/UserManageView.vue'), meta: { title: '用户管理', permission: 'system:user:view' } },
+      { path: 'system/roles', component: () => import('../views/system/SystemView.vue'), meta: { title: '角色管理', permission: 'system:role:view' } },
       { path: 'system/menus', component: () => import('../views/system/MenuManageView.vue'), meta: { title: '菜单管理', permission: 'system:menu:view' } },
       { path: 'system/logs', component: () => import('../views/system/LogManageView.vue'), meta: { title: '日志管理', permission: 'system:log:view' } }
     ]

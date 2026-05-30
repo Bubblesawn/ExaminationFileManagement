@@ -25,6 +25,7 @@
             <span>系统管理</span>
           </template>
           <el-menu-item v-if="can('system:user:view')" index="/system"><span>用户管理</span></el-menu-item>
+          <el-menu-item v-if="can('system:role:view')" index="/system/roles"><span>角色管理</span></el-menu-item>
           <el-menu-item v-if="can('system:menu:view')" index="/system/menus"><span>菜单管理</span></el-menu-item>
           <el-menu-item v-if="can('system:log:view')" index="/system/logs"><span>日志管理</span></el-menu-item>
         </el-sub-menu>
@@ -49,7 +50,7 @@ import { useRouter } from 'vue-router'
 import { clearLoginResult, hasPermission } from '../utils/authToken'
 
 const router = useRouter()
-const systemPermissions = ['system:user:view', 'system:menu:view', 'system:log:view']
+const systemPermissions = ['system:user:view', 'system:role:view', 'system:menu:view', 'system:log:view']
 const hasSystemMenu = computed(() => systemPermissions.some((permission) => can(permission)))
 
 /**

@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * @brief 修改系统用户请求对象。
  */
@@ -27,4 +29,9 @@ public class SysUserUpdateDTO {
 
     @Pattern(regexp = "ENABLED|DISABLED", message = "只能为ENABLED或DISABLED")
     private String status;
+
+    /**
+     * @brief 用户绑定的角色ID列表，为空集合表示清空角色，为null表示保持不变。
+     */
+    private List<Long> roleIds;
 }

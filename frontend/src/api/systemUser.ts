@@ -10,6 +10,8 @@ export interface SystemUser {
   email?: string
   avatar?: string
   status: UserStatus
+  roleIds?: number[]
+  roleNames?: string[]
   lastLoginTime?: string
   createTime?: string
   updateTime?: string
@@ -38,6 +40,7 @@ export interface UserCreatePayload {
   email?: string
   avatar?: string
   status?: UserStatus
+  roleIds?: number[]
 }
 
 export interface UserUpdatePayload {
@@ -46,6 +49,7 @@ export interface UserUpdatePayload {
   email?: string
   avatar?: string
   status?: UserStatus
+  roleIds?: number[]
 }
 
 /**
@@ -97,6 +101,15 @@ export function enableSystemUser(id: number) {
  */
 export function disableSystemUser(id: number) {
   return http.put<SystemUser, SystemUser>(`/system/users/${id}/disable`)
+}
+
+/**
+ * @brief 删除系统用户。
+ *
+ * @param id 用户主键。
+ */
+export function deleteSystemUser(id: number) {
+  return http.delete<void, void>(`/system/users/${id}`)
 }
 
 /**

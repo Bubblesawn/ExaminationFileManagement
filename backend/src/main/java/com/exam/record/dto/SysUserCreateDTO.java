@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * @brief 新增系统用户请求对象。
  */
@@ -35,4 +37,9 @@ public class SysUserCreateDTO {
 
     @Pattern(regexp = "ENABLED|DISABLED", message = "只能为ENABLED或DISABLED")
     private String status;
+
+    /**
+     * @brief 新用户绑定的角色ID列表。
+     */
+    private List<Long> roleIds;
 }
