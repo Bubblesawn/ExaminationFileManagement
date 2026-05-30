@@ -137,8 +137,27 @@
 
     <el-drawer v-model="formDrawerVisible" :title="formMode === 'create' ? '新增转考申请' : '编辑转考申请'" size="720px">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
-        <el-form-item v-if="formMode === 'create'" label="考籍档案ID" prop="recordId">
-          <el-input-number v-model="form.recordId" :min="1" controls-position="right" />
+        <el-form-item v-if="formMode === 'create'" label="考籍档案" prop="recordId">
+          <el-select
+            v-model="form.recordId"
+            class="full-select"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchStudentRecords"
+            :loading="recordLoading"
+            placeholder="输入考籍号、姓名或身份证号搜索"
+            @change="handleRecordChange"
+            @visible-change="handleRecordSelectVisible"
+          >
+            <el-option
+              v-for="record in recordOptions"
+              :key="record.id"
+              :label="formatRecordOption(record)"
+              :value="record.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="转考类型" prop="transferType">
           <el-radio-group v-model="form.transferType" :disabled="formMode === 'edit'" @change="handleTransferTypeChange">
@@ -168,8 +187,25 @@
         <el-form-item label="转考原因" prop="transferReason">
           <el-input v-model="form.transferReason" type="textarea" :rows="4" maxlength="512" show-word-limit />
         </el-form-item>
-        <el-form-item label="材料ID">
-          <el-input v-model="materialIdsText" placeholder="多个材料ID用英文逗号分隔" />
+        <el-form-item label="申请材料">
+          <el-select
+            v-model="selectedMaterialIds"
+            class="full-select"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="!form.recordId"
+            :loading="materialLoading"
+            :placeholder="form.recordId ? '请选择当前档案材料' : '请先选择考籍档案'"
+          >
+            <el-option
+              v-for="material in materialOptions"
+              :key="material.id"
+              :label="formatMaterialOption(material)"
+              :value="material.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="3" maxlength="512" show-word-limit />
@@ -188,7 +224,7 @@
           <el-descriptions-item label="申请编号">{{ selectedApplication.applicationNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ applicationStatusText(selectedApplication.applicationStatus) }}</el-descriptions-item>
           <el-descriptions-item label="转考类型">{{ transferTypeText(selectedApplication.businessType) }}</el-descriptions-item>
-          <el-descriptions-item label="考籍档案ID">{{ selectedApplication.recordId }}</el-descriptions-item>
+          <el-descriptions-item label="考籍档案">{{ selectedApplication.recordNo || selectedApplication.recordId }}</el-descriptions-item>
           <el-descriptions-item label="考生姓名">{{ selectedApplication.candidateName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="考籍号">{{ selectedApplication.recordNo || '-' }}</el-descriptions-item>
           <el-descriptions-item label="原考籍省份">{{ selectedApplication.sourceProvince || '-' }}</el-descriptions-item>
@@ -196,7 +232,7 @@
           <el-descriptions-item label="原考籍号">{{ selectedApplication.sourceRecordNo || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目标省份">{{ selectedApplication.targetProvince || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目标接收单位">{{ selectedApplication.targetSchool || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="申请材料ID">{{ selectedApplication.materialIds?.join(', ') || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="申请材料">{{ selectedApplication.materialIds?.join(', ') || '-' }}</el-descriptions-item>
           <el-descriptions-item label="转考原因" :span="2">{{ selectedApplication.transferReason || '-' }}</el-descriptions-item>
           <el-descriptions-item label="审核意见" :span="2">{{ selectedApplication.auditOpinion || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ selectedApplication.remark || '-' }}</el-descriptions-item>
@@ -261,6 +297,8 @@ import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import { recognizeSpeech, synthesizeSpeech, uploadSpeechAudio } from '../../api/ai'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import { listRecordMaterials, type RecordMaterial } from '../../api/material'
+import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   approveTransferApplication,
   getTransferApplicationDetail,
@@ -278,7 +316,11 @@ const loading = ref(false)
 const saving = ref(false)
 const voiceQueryLoading = ref(false)
 const ttsLoading = ref(false)
+const recordLoading = ref(false)
+const materialLoading = ref(false)
 const applications = ref<TransferApplication[]>([])
+const recordOptions = ref<StudentRecord[]>([])
+const materialOptions = ref<RecordMaterial[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
 const detailDrawerVisible = ref(false)
@@ -289,7 +331,7 @@ const auditMode = ref<'approve' | 'reject'>('approve')
 const selectedApplication = ref<TransferApplication | null>(null)
 const flowRecords = ref<TransferFlowRecord[]>([])
 const formRef = ref<FormInstance>()
-const materialIdsText = ref('')
+const selectedMaterialIds = ref<number[]>([])
 const voiceQueryText = ref('')
 const lastNoticeText = ref('')
 const voiceHintText = ref('点击开始语音后自动查询转考申请')
@@ -328,7 +370,7 @@ const withdrawForm = reactive({
 })
 
 const formRules: FormRules = {
-  recordId: [{ required: true, message: '请输入考籍档案ID', trigger: 'blur' }],
+  recordId: [{ required: true, message: '请选择考籍档案', trigger: 'change' }],
   transferType: [{ required: true, message: '请选择转考类型', trigger: 'change' }],
   sourceProvince: [
     {
@@ -557,6 +599,7 @@ function openCreateDrawer() {
   selectedApplication.value = null
   resetForm()
   formDrawerVisible.value = true
+  searchStudentRecords('')
 }
 
 async function openEditDrawer(row: TransferApplication) {
@@ -574,7 +617,8 @@ async function openEditDrawer(row: TransferApplication) {
     transferReason: selectedApplication.value.transferReason || '',
     remark: selectedApplication.value.remark || ''
   })
-  materialIdsText.value = (selectedApplication.value.materialIds || []).join(',')
+  selectedMaterialIds.value = [...(selectedApplication.value.materialIds || [])]
+  await loadRecordMaterials(selectedApplication.value.recordId)
   formDrawerVisible.value = true
 }
 
@@ -619,7 +663,7 @@ async function submitForm() {
       targetProvince: form.targetProvince || undefined,
       targetSchool: form.targetSchool || undefined,
       transferReason: form.transferReason,
-      materialIds: parseMaterialIds(),
+      materialIds: selectedMaterialIds.value,
       remark: form.remark || undefined
     }
     if (formMode.value === 'create') {
@@ -686,18 +730,93 @@ function resetForm() {
     transferReason: '',
     remark: ''
   })
-  materialIdsText.value = ''
+  recordOptions.value = []
+  selectedMaterialIds.value = []
+  materialOptions.value = []
   formRef.value?.clearValidate()
 }
 
-function parseMaterialIds() {
-  if (!materialIdsText.value.trim()) {
-    return []
+/**
+ * @brief 远程搜索可办理转考业务的考籍档案。
+ *
+ * @param keyword 考籍号、考生姓名或身份证号关键字。
+ */
+async function searchStudentRecords(keyword: string) {
+  recordLoading.value = true
+  try {
+    const result = await pageStudentRecords({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      recordStatus: 'NORMAL',
+      archiveStatus: 'UNARCHIVED'
+    })
+    recordOptions.value = result.records ?? []
+  } finally {
+    recordLoading.value = false
   }
-  return materialIdsText.value
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isFinite(item) && item > 0)
+}
+
+/**
+ * @brief 首次展开考籍档案下拉框时加载可选档案。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRecordSelectVisible(visible: boolean) {
+  if (visible && recordOptions.value.length === 0) {
+    searchStudentRecords('')
+  }
+}
+
+/**
+ * @brief 切换考籍档案后加载该档案材料并清空旧选择。
+ *
+ * @param recordId 当前选中的考籍档案主键。
+ */
+async function handleRecordChange(recordId?: number) {
+  selectedMaterialIds.value = []
+  await loadRecordMaterials(recordId)
+}
+
+/**
+ * @brief 加载指定考籍档案的材料列表。
+ *
+ * @param recordId 考籍档案主键。
+ */
+async function loadRecordMaterials(recordId?: number) {
+  if (!recordId) {
+    materialOptions.value = []
+    return
+  }
+  materialLoading.value = true
+  try {
+    materialOptions.value = await listRecordMaterials({ recordId })
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+/**
+ * @brief 格式化考籍档案选项。
+ *
+ * @param record 考籍档案摘要。
+ * @return 下拉框展示文本。
+ */
+function formatRecordOption(record: StudentRecord) {
+  const idCard = record.idCard ? ` / ${record.idCard}` : ''
+  const majorName = record.majorName ? ` / ${record.majorName}` : ''
+  return `${record.recordNo} / ${record.candidateName || '未知考生'}${idCard}${majorName}`
+}
+
+/**
+ * @brief 格式化材料选项。
+ *
+ * @param material 档案材料摘要。
+ * @return 下拉框展示文本。
+ */
+function formatMaterialOption(material: RecordMaterial) {
+  const fileName = material.originalFileName || material.fileName || `材料${material.id}`
+  return `${material.materialType} / ${fileName} / ${auditStatusText(material.auditStatus)}`
 }
 
 function transferTypeText(type?: string) {
@@ -728,6 +847,15 @@ function applicationStatusTag(status?: string) {
   if (status === 'REJECTED') return 'danger'
   if (status === 'WITHDRAWN') return 'info'
   return 'warning'
+}
+
+function auditStatusText(status?: string) {
+  const statusMap: Record<string, string> = {
+    PENDING: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回'
+  }
+  return statusMap[status || ''] || status || '-'
 }
 
 function flowActionText(action?: string) {
@@ -840,6 +968,10 @@ onMounted(loadApplications)
 
 .query-form :deep(.el-select) {
   width: 180px;
+}
+
+.full-select {
+  width: 100%;
 }
 
 .voice-query {
