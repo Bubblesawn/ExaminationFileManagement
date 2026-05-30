@@ -218,6 +218,7 @@
           </el-timeline-item>
         </el-timeline>
 
+        <BusinessMaterialList :business-no="selectedApplication.applicationNo" />
         <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
@@ -261,6 +262,7 @@ import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import { recognizeSpeech, synthesizeSpeech, uploadSpeechAudio } from '../../api/ai'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import BusinessMaterialList from '../../components/material/BusinessMaterialList.vue'
 import {
   approveTransferApplication,
   getTransferApplicationDetail,

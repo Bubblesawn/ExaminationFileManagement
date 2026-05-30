@@ -1,807 +1,606 @@
 <template>
   <div class="page material-audit-page">
-    <div class="page-heading">
+    <div class="page-header">
       <div>
         <h2 class="page-title">材料审核</h2>
-        <p>联调业务申请材料分类、缺失材料提示和异常材料提醒。</p>
+        <p class="page-subtitle">按业务编号定位免考、课程顶替、转入转出和毕业业务，上传材料后自动同步到对应业务。</p>
       </div>
-      <el-tag :type="overallTagType" effect="light">{{ overallActionText }}</el-tag>
+      <el-tag v-if="businessBundle" :type="applicationStatusTag(businessBundle.applicationStatus)" effect="light">
+        {{ applicationStatusText(businessBundle.applicationStatus) }}
+      </el-tag>
     </div>
 
-    <el-row :gutter="16">
-      <el-col :xs="24" :lg="9">
-        <section class="panel">
-          <div class="panel-title">申请信息</div>
-          <el-form label-position="top">
-            <el-row :gutter="12">
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="业务编号">
-                  <el-input-number v-model="form.businessId" :min="1" controls-position="right" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="申请人">
-                  <el-input v-model="form.applicantName" clearable />
-                </el-form-item>
-              </el-col>
-            </el-row>
+    <el-card shadow="never" class="query-card">
+      <el-form :inline="true" class="query-form" @submit.prevent>
+        <el-form-item label="业务编号">
+          <el-input
+            v-model="businessNo"
+            clearable
+            placeholder="请输入业务编号或业务ID"
+            @keyup.enter="loadBusinessMaterials"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :icon="Search" :loading="loading" @click="loadBusinessMaterials">查询业务</el-button>
+          <el-button :icon="Refresh" @click="resetPage">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
 
-            <el-form-item label="申请类型">
-              <el-select v-model="form.applicationType">
-                <el-option label="免考申请" value="EXEMPTION" />
-                <el-option label="课程顶替" value="COURSE_REPLACE" />
-                <el-option label="考籍转入转出" value="TRANSFER" />
-                <el-option label="毕业申请" value="GRADUATION" />
-              </el-select>
-            </el-form-item>
-          </el-form>
-        </section>
+    <el-empty v-if="!businessBundle && !loading" description="请输入业务编号查询待上传材料的业务" />
 
-        <section class="panel">
-          <div class="panel-title">
-            <span>申请材料</span>
-            <el-button text type="primary" @click="addMaterial">新增材料</el-button>
-          </div>
+    <template v-else-if="businessBundle">
+      <el-row :gutter="16">
+        <el-col :xs="24" :lg="8">
+          <el-card shadow="never" class="info-card">
+            <template #header>
+              <div class="card-header">
+                <span>业务信息</span>
+                <el-tag effect="plain">{{ businessTypeText(businessBundle.businessType) }}</el-tag>
+              </div>
+            </template>
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="业务编号">{{ businessBundle.applicationNo }}</el-descriptions-item>
+              <el-descriptions-item label="业务ID">{{ businessBundle.id }}</el-descriptions-item>
+              <el-descriptions-item label="考籍档案ID">{{ businessBundle.recordId }}</el-descriptions-item>
+              <el-descriptions-item label="业务标题">{{ businessBundle.applicationTitle || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="当前节点">{{ businessBundle.currentNodeName || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="提交人">{{ businessBundle.applyUserName || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="提交时间">{{ businessBundle.submitTime || '-' }}</el-descriptions-item>
+            </el-descriptions>
+          </el-card>
 
-          <div class="material-list">
-            <div v-for="(item, index) in materials" :key="item.localId" class="material-item">
-              <div class="material-header">
-                <span>材料 {{ index + 1 }}</span>
-                <el-button text type="danger" :disabled="materials.length === 1" @click="removeMaterial(index)">
-                  删除
+          <el-card shadow="never" class="upload-card">
+            <template #header>
+              <div class="card-header">
+                <span>上传材料</span>
+                <span class="material-count">已绑定 {{ businessBundle.materialIds.length }} 份</span>
+              </div>
+            </template>
+            <el-form label-position="top" @submit.prevent>
+              <el-form-item label="材料类型">
+                <el-select
+                  v-model="selectedMaterialType"
+                  :loading="materialTypeLoading"
+                  placeholder="请选择材料类型"
+                  filterable
+                >
+                  <el-option
+                    v-for="item in materialTypes"
+                    :key="item.typeCode"
+                    :label="item.typeName"
+                    :value="item.typeCode"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-upload
+                drag
+                accept=".jpg,.jpeg,.png,.pdf"
+                :disabled="uploadDisabled"
+                :show-file-list="false"
+                :http-request="handleUploadRequest"
+                :before-upload="validateBeforeUpload"
+              >
+                <el-icon class="upload-icon"><UploadFilled /></el-icon>
+                <div class="el-upload__text">拖拽材料到此处，或点击选择文件</div>
+                <template #tip>
+                  <div class="el-upload__tip">支持 JPG、JPEG、PNG、PDF，单个文件不超过 20MB。</div>
+                </template>
+              </el-upload>
+              <el-alert
+                v-if="uploadDisabledReason"
+                :title="uploadDisabledReason"
+                type="warning"
+                show-icon
+                :closable="false"
+                class="upload-alert"
+              />
+            </el-form>
+          </el-card>
+        </el-col>
+
+        <el-col :xs="24" :lg="16">
+          <el-card shadow="never" class="table-card">
+            <template #header>
+              <div class="card-header">
+                <span>业务材料</span>
+                <el-button text type="primary" :icon="Refresh" :loading="loading" @click="loadBusinessMaterials">
+                  刷新
                 </el-button>
               </div>
-              <el-form label-position="top">
-                <el-form-item label="材料文件">
-                  <div class="upload-field">
-                    <el-upload
-                      accept=".jpg,.jpeg,.png,.bmp,.webp"
-                      :auto-upload="false"
-                      :show-file-list="false"
-                      :on-change="createMaterialUploadHandler(item)"
-                    >
-                      <el-button :loading="item.uploading" type="primary" plain>
-                        {{ item.fileName ? '重新上传' : '上传材料' }}
-                      </el-button>
-                    </el-upload>
-                    <span class="upload-name">{{ item.fileName || '支持 jpg、jpeg、png、bmp、webp' }}</span>
-                  </div>
-                </el-form-item>
-                <el-form-item v-if="item.fileUrl" label="材料访问地址">
-                  <el-input v-model="item.fileUrl" readonly />
-                </el-form-item>
-                <el-row :gutter="10">
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="文件名称">
-                      <el-input v-model="item.fileName" clearable />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="登记类别">
-                      <el-select v-model="item.uploadedCategoryCode" clearable>
-                        <el-option
-                          v-for="option in materialTypeOptions"
-                          :key="option.value"
-                          :label="option.label"
-                          :value="option.value"
-                        />
-                      </el-select>
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-form-item label="类型提示">
-                  <el-input v-model="item.materialTypeHint" clearable placeholder="例如 身份证、成绩单、毕业证" />
-                </el-form-item>
-                <el-row :gutter="10">
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="MIME 类型">
-                      <el-input v-model="item.contentType" clearable placeholder="例如 image/jpeg" />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :xs="24" :sm="12">
-                    <el-form-item label="文件大小(KB)">
-                      <el-input-number v-model="item.fileSizeKb" :min="0" controls-position="right" />
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-              </el-form>
-            </div>
-          </div>
-
-          <el-button type="primary" :loading="loading" class="submit-button" @click="submitAudit">
-            发起智能核验
-          </el-button>
-        </section>
-      </el-col>
-
-      <el-col :xs="24" :lg="15">
-        <section class="panel preprocess-panel">
-          <div class="panel-title">材料预处理结果</div>
-          <el-empty v-if="preprocessResults.length === 0" description="发起智能核验后展示格式、清晰度和分类结果" />
-          <el-table v-else :data="preprocessResults" size="small" border>
-            <el-table-column prop="file_name" label="文件名称" min-width="150" />
-            <el-table-column label="格式校验" width="110">
-              <template #default="{ row }">
-                <el-tag :type="row.format_validation.valid ? 'success' : 'danger'" size="small">
-                  {{ row.format_validation.valid ? '通过' : '不通过' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="文件后缀" width="90">
-              <template #default="{ row }">{{ row.format_validation.file_suffix || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="清晰度" min-width="150">
-              <template #default="{ row }">
-                <div class="clarity-cell">
-                  <el-tag :type="clarityTagType(row.clarity.level)" size="small">
-                    {{ clarityText(row.clarity.level) }}
+            </template>
+            <el-alert
+              type="success"
+              show-icon
+              :closable="false"
+              title="材料上传后会自动写入该业务的材料ID，免考、课程顶替、转入转出和毕业管理页面可直接查看并审核。"
+            />
+            <el-table :data="businessMaterials" border class="material-table">
+              <el-table-column prop="id" label="材料ID" width="90" align="center" />
+              <el-table-column prop="originalFileName" label="文件名称" min-width="190" show-overflow-tooltip />
+              <el-table-column label="材料类型" min-width="150">
+                <template #default="{ row }">{{ materialTypeName(row.materialType) }}</template>
+              </el-table-column>
+              <el-table-column label="绑定业务" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="isBoundMaterial(row.id) ? 'success' : 'info'" size="small">
+                    {{ isBoundMaterial(row.id) ? '已绑定' : '档案材料' }}
                   </el-tag>
-                  <span>{{ formatPercent(row.clarity.score) }}</span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column prop="category_name" label="基础分类" min-width="130" />
-            <el-table-column label="置信度" width="100">
-              <template #default="{ row }">{{ formatPercent(row.confidence) }}</template>
-            </el-table-column>
-            <el-table-column label="建议" width="110">
-              <template #default="{ row }">
-                <el-tag :type="actionTagType(row.suggested_action)" size="small">
-                  {{ actionText(row.suggested_action) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="问题提示" min-width="220">
-              <template #default="{ row }">{{ formatPreprocessIssues(row) }}</template>
-            </el-table-column>
-          </el-table>
-        </section>
+                </template>
+              </el-table-column>
+              <el-table-column label="大小" width="110" align="right">
+                <template #default="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="110" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="materialAuditStatusTag(row.auditStatus)" size="small">
+                    {{ materialAuditStatusText(row.auditStatus) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="createTime" label="上传时间" min-width="170" show-overflow-tooltip />
+              <el-table-column label="操作" width="220" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" :icon="View" @click="previewMaterial(row)">预览</el-button>
+                  <el-button link type="primary" :icon="Download" @click="downloadMaterial(row)">下载</el-button>
+                  <el-button link type="danger" :icon="Delete" @click="deleteMaterial(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="businessMaterials.length === 0" description="该业务暂无材料，请在左侧上传" />
+          </el-card>
 
-        <section class="panel result-overview">
-          <div class="panel-title">智能辅助结果</div>
-          <el-empty v-if="!auditResult" description="请先发起申请材料智能核验" />
-
-          <template v-else>
-            <div class="metric-grid">
-              <div class="metric-item">
-                <span>已上传</span>
-                <strong>{{ auditResult.summary.material_count ?? 0 }}</strong>
-              </div>
-              <div class="metric-item danger">
-                <span>缺失材料</span>
-                <strong>{{ auditResult.summary.missing_count ?? 0 }}</strong>
-              </div>
-              <div class="metric-item warning">
-                <span>异常提醒</span>
-                <strong>{{ auditResult.summary.abnormal_count ?? 0 }}</strong>
-              </div>
-              <div class="metric-item">
-                <span>需复核</span>
-                <strong>{{ auditResult.summary.manual_review_count ?? 0 }}</strong>
-              </div>
-            </div>
-
-            <div class="result-section">
-              <div class="section-title">必交材料清单</div>
-              <div class="required-list">
-                <el-tag v-for="item in auditResult.required_categories" :key="item.category_code" effect="plain">
-                  {{ item.category_name }}
+          <el-card v-if="latestRecognition" shadow="never" class="recognition-card">
+            <template #header>
+              <div class="card-header">
+                <span>上传即时识别</span>
+                <el-tag :type="actionTagType(latestRecognition.suggested_action)" effect="light">
+                  {{ actionText(latestRecognition.suggested_action) }}
                 </el-tag>
               </div>
-            </div>
+            </template>
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="识别类别">{{ latestRecognition.category_name || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="类别编码">{{ latestRecognition.category_code || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="置信度">{{ formatPercent(latestRecognition.confidence) }}</el-descriptions-item>
+              <el-descriptions-item label="需复核">{{ latestRecognition.need_manual_review ? '是' : '否' }}</el-descriptions-item>
+            </el-descriptions>
+          </el-card>
 
-            <div class="result-section">
-              <div class="section-title">缺失材料提示</div>
-              <el-alert
-                v-if="auditResult.missing_materials.length === 0"
-                title="必交材料已齐全"
-                type="success"
-                show-icon
-                :closable="false"
-              />
-              <el-table v-else :data="auditResult.missing_materials" size="small" border>
-                <el-table-column prop="category_name" label="缺失材料" min-width="140" />
-                <el-table-column label="等级" width="90">
-                  <template #default="{ row }">
-                    <el-tag :type="riskTagType(row.severity)" size="small">{{ riskText(row.severity) }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="message" label="提示" min-width="260" />
-              </el-table>
-            </div>
+          <ApplicationMaterialAuditPanel
+            :application-id="businessBundle.id"
+            title="材料算法审核"
+            description="对当前业务已绑定材料发起智能核验，检查材料缺失、分类和异常风险。"
+          />
+        </el-col>
+      </el-row>
+    </template>
 
-            <div class="result-section">
-              <div class="section-title">异常材料提醒</div>
-              <el-alert
-                v-if="auditResult.abnormal_materials.length === 0"
-                title="暂未发现异常材料"
-                type="success"
-                show-icon
-                :closable="false"
-              />
-              <el-table v-else :data="auditResult.abnormal_materials" size="small" border>
-                <el-table-column prop="category_name" label="材料类别" min-width="130" />
-                <el-table-column prop="abnormal_type" label="异常类型" min-width="150" />
-                <el-table-column label="风险" width="90">
-                  <template #default="{ row }">
-                    <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskText(row.risk_level) }}</el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="message" label="异常说明" min-width="240" />
-                <el-table-column prop="suggestion" label="处理建议" min-width="240" />
-              </el-table>
-            </div>
-          </template>
-        </section>
-
-        <section v-if="auditResult" class="panel">
-          <div class="panel-title">材料分类结果</div>
-          <el-table :data="auditResult.classified_materials" size="small" border>
-            <el-table-column prop="file_name" label="文件名称" min-width="160" />
-            <el-table-column prop="category_name" label="识别类别" min-width="130" />
-            <el-table-column label="登记类别" min-width="130">
-              <template #default="{ row }">{{ formatUploadedCategory(row.uploaded_category_code) }}</template>
-            </el-table-column>
-            <el-table-column label="置信度" width="100">
-              <template #default="{ row }">{{ formatPercent(row.confidence) }}</template>
-            </el-table-column>
-            <el-table-column label="图片质量" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.quality.readable ? 'success' : 'danger'" size="small">
-                  {{ row.quality.readable ? '可用' : '需处理' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="建议" width="110">
-              <template #default="{ row }">
-                <el-tag :type="actionTagType(row.suggested_action)" size="small">
-                  {{ actionText(row.suggested_action) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div class="result-actions">
-            <el-button @click="copySummary">复制联调摘要</el-button>
-            <el-button type="primary" @click="confirmAudit">确认核验结果</el-button>
-          </div>
-        </section>
-      </el-col>
-    </el-row>
+    <el-dialog v-model="previewVisible" :title="previewTitle" width="80%" top="6vh" destroy-on-close @closed="revokePreviewUrl">
+      <div class="preview-body">
+        <img v-if="previewKind === 'image' && previewObjectUrl" :src="previewObjectUrl" alt="材料图片预览" />
+        <iframe v-else-if="previewKind === 'pdf' && previewObjectUrl" :src="previewObjectUrl" title="材料 PDF 预览" />
+        <el-empty v-else description="该文件类型暂不支持在线预览，请下载查看" />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import type { UploadFile } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox, type UploadRequestOptions, type UploadRawFile } from 'element-plus'
+import { Delete, Download, Refresh, Search, UploadFilled, View } from '@element-plus/icons-vue'
+import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import { recognizeImage, type AiRecognitionData, type SuggestedAction } from '../../api/ai'
 import {
-  auditApplicationMaterials,
-  preprocessMaterial,
-  recognizeImage,
-  uploadMaterialFile,
-  type ApplicationMaterialAuditData,
-  type ImageClarityResult,
-  type MaterialPreprocessData,
-  type SuggestedAction
-} from '../../api/ai'
+  downloadRecordMaterial,
+  deleteRecordMaterial,
+  getBusinessMaterials,
+  listEnabledMaterialTypes,
+  previewRecordMaterial,
+  uploadBusinessMaterial,
+  type BusinessMaterialBundle,
+  type MaterialType,
+  type RecordMaterial
+} from '../../api/material'
 
-interface EditableMaterial {
-  localId: number
-  materialId?: number
-  fileUrl: string
-  fileName: string
-  materialTypeHint: string
-  uploadedCategoryCode: string
-  contentType: string
-  fileSizeKb: number
-  uploading?: boolean
-}
+const maxFileSize = 20 * 1024 * 1024
+const allowedSuffixes = new Set(['jpg', 'jpeg', 'png', 'pdf'])
+const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'application/pdf'])
 
-type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
-type ClarityLevel = ImageClarityResult['level']
+const businessNo = ref('')
+const loading = ref(false)
+const uploading = ref(false)
+const materialTypeLoading = ref(false)
+const businessBundle = ref<BusinessMaterialBundle | null>(null)
+const materialTypes = ref<MaterialType[]>([])
+const selectedMaterialType = ref('')
+const previewVisible = ref(false)
+const previewObjectUrl = ref('')
+const currentPreviewMaterial = ref<RecordMaterial | null>(null)
+const latestRecognition = ref<AiRecognitionData | null>(null)
 
-const materialTypeOptions = [
-  { label: '身份证材料', value: 'ID_CARD' },
-  { label: '准考证材料', value: 'ADMISSION_TICKET' },
-  { label: '学历证书材料', value: 'DIPLOMA' },
-  { label: '成绩单材料', value: 'TRANSCRIPT' },
-  { label: '免考证明材料', value: 'EXEMPTION_CERTIFICATE' },
-  { label: '考生照片', value: 'PHOTO' }
-]
-
-const materialRequirementOrder: Record<string, string[]> = {
-  EXEMPTION: ['ID_CARD', 'TRANSCRIPT', 'EXEMPTION_CERTIFICATE'],
-  COURSE_REPLACE: ['ID_CARD', 'TRANSCRIPT', 'DIPLOMA'],
-  TRANSFER: ['ID_CARD', 'ADMISSION_TICKET', 'TRANSCRIPT'],
-  GRADUATION: ['ID_CARD', 'DIPLOMA', 'TRANSCRIPT', 'PHOTO']
-}
-
-const actionTextMap: Record<SuggestedAction, string> = {
-  ACCEPT: '建议通过',
-  REVIEW: '建议复核',
-  REJECT: '建议退回'
-}
-
-const form = reactive({
-  businessId: 2026052701,
-  applicationType: 'EXEMPTION',
-  applicantName: '张三'
+const businessMaterials = computed(() => {
+  const bundle = businessBundle.value
+  if (!bundle) return []
+  const boundIds = new Set(bundle.materialIds)
+  return [...bundle.materials].sort((left, right) => {
+    const leftBound = boundIds.has(left.id) ? 0 : 1
+    const rightBound = boundIds.has(right.id) ? 0 : 1
+    if (leftBound !== rightBound) return leftBound - rightBound
+    return right.id - left.id
+  })
+})
+const uploadDisabled = computed(() => Boolean(uploadDisabledReason.value))
+const previewTitle = computed(() => currentPreviewMaterial.value?.originalFileName || '材料预览')
+const previewKind = computed(() => {
+  const suffix = currentPreviewMaterial.value?.fileSuffix?.toLowerCase()
+  if (suffix === 'pdf') return 'pdf'
+  if (suffix && ['jpg', 'jpeg', 'png'].includes(suffix)) return 'image'
+  return 'other'
+})
+const uploadDisabledReason = computed(() => {
+  if (!businessBundle.value) return '请先查询业务后再上传材料。'
+  if (materialTypeLoading.value) return '正在加载材料类型，请稍候。'
+  if (materialTypes.value.length === 0) return '暂无可用材料类型，请先维护材料类型。'
+  if (!selectedMaterialType.value) return '请选择材料类型后再上传。'
+  if (uploading.value) return '材料正在上传，请稍候。'
+  return ''
 })
 
-const materials = ref<EditableMaterial[]>([
-  {
-    localId: 1,
-    fileUrl: '',
-    fileName: '',
-    materialTypeHint: '',
-    uploadedCategoryCode: '',
-    contentType: '',
-    fileSizeKb: 0
-  }
-])
-const loading = ref(false)
-const auditResult = ref<ApplicationMaterialAuditData | null>(null)
-const preprocessResults = ref<MaterialPreprocessData[]>([])
-
-const overallActionText = computed(() => actionText(auditResult.value?.suggested_action ?? 'REVIEW'))
-const overallTagType = computed(() => actionTagType(auditResult.value?.suggested_action ?? 'REVIEW'))
+/**
+ * @brief 初始化材料类型。
+ */
+onMounted(loadMaterialTypes)
 
 /**
- * @brief 新增一条可编辑申请材料。
+ * @brief 查询业务申请和材料列表。
  */
-function addMaterial() {
-  materials.value.push({
-    localId: Date.now(),
-    fileUrl: '',
-    fileName: '',
-    materialTypeHint: '',
-    uploadedCategoryCode: '',
-    contentType: '',
-    fileSizeKb: 0
-  })
-}
-
-/**
- * @brief 移除一条申请材料。
- *
- * @param index 材料下标。
- */
-function removeMaterial(index: number) {
-  materials.value.splice(index, 1)
-}
-
-/**
- * @brief 创建当前材料行的上传回调。
- *
- * @param item 当前正在编辑的材料记录。
- * @return Element Plus 上传控件变更处理函数。
- */
-function createMaterialUploadHandler(item: EditableMaterial) {
-  return (uploadFile: UploadFile) => handleMaterialFileChange(uploadFile.raw, item)
-}
-
-/**
- * @brief 上传申请材料文件并回填识别所需地址。
- *
- * @param file 用户在上传控件中选择的材料文件。
- * @param item 当前正在编辑的材料记录。
- */
-async function handleMaterialFileChange(file: File | undefined, item: EditableMaterial) {
-  if (!file) return
-
-  item.uploading = true
-  try {
-    const uploadResult = await uploadMaterialFile(file)
-    item.fileName = uploadResult.fileName || file.name
-    item.fileUrl = uploadResult.fileUrl
-    item.contentType = uploadResult.contentType || file.type
-    item.fileSizeKb = Math.ceil((uploadResult.size || file.size) / 1024)
-    if (!item.materialTypeHint) {
-      item.materialTypeHint = inferMaterialHint(item.fileName)
-    }
-    await autoRecognizeMaterial(item)
-    ElMessage.success('材料上传成功，已自动识别材料类别')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '材料上传失败')
-  } finally {
-    item.uploading = false
-  }
-}
-
-/**
- * @brief 上传后立即调用单图分类接口并回填材料类别。
- *
- * @param item 当前已上传的材料记录。
- */
-async function autoRecognizeMaterial(item: EditableMaterial) {
-  const response = await recognizeImage('classify', {
-    businessId: form.businessId,
-    fileUrl: item.fileUrl,
-    fileName: item.fileName,
-    materialTypeHint: item.materialTypeHint
-  })
-
-  if (response.code !== 200 || !response.data) {
-    throw new Error(response.message || '材料类别自动识别失败')
-  }
-
-  const categoryCode = response.data.category_code
-  if (categoryCode && categoryCode !== 'UNKNOWN') {
-    item.uploadedCategoryCode = categoryCode
-    item.materialTypeHint = categoryNameToHint(categoryCode) || item.materialTypeHint
+async function loadBusinessMaterials() {
+  const normalizedBusinessNo = businessNo.value.trim()
+  if (!normalizedBusinessNo) {
+    ElMessage.warning('请输入业务编号或业务ID')
     return
   }
-
-  const fallbackCategoryCode = inferExpectedCategory(item)
-  if (fallbackCategoryCode) {
-    item.uploadedCategoryCode = fallbackCategoryCode
-    item.materialTypeHint = categoryNameToHint(fallbackCategoryCode) || item.materialTypeHint
-  }
-}
-
-/**
- * @brief 发起申请材料智能核验联调请求。
- */
-async function submitAudit() {
-  const invalidItem = materials.value.find((item) => !item.fileUrl.trim())
-  if (invalidItem) {
-    ElMessage.warning('请先上传所有申请材料')
-    return
-  }
-
   loading.value = true
   try {
-    const preprocessResponses = await Promise.all(
-      materials.value.map((item) =>
-        preprocessMaterial({
-          businessId: form.businessId,
-          scene: 'MATERIAL_AUDIT',
-          fileUrl: item.fileUrl,
-          fileName: item.fileName,
-          materialTypeHint: item.materialTypeHint,
-          contentType: item.contentType || undefined,
-          fileSizeKb: item.fileSizeKb
-        })
-      )
-    )
-    const preprocessFailure = preprocessResponses.find((item) => item.code !== 200 || !item.data)
-    if (preprocessFailure) {
-      ElMessage.error(preprocessFailure.message || '材料预处理失败')
-      return
-    }
-    preprocessResults.value = preprocessResponses.map((item) => item.data)
-
-    const response = await auditApplicationMaterials({
-      businessId: form.businessId,
-      applicationType: form.applicationType,
-      applicantName: form.applicantName,
-      materials: materials.value.map((item) => ({
-        materialId: item.materialId,
-        fileUrl: item.fileUrl,
-        fileName: item.fileName,
-        materialTypeHint: item.materialTypeHint,
-        uploadedCategoryCode: item.uploadedCategoryCode || undefined
-      }))
-    })
-
-    if (response.code !== 200) {
-      ElMessage.error(response.message || '申请材料智能核验失败')
-      return
-    }
-
-    auditResult.value = response.data
-    ElMessage.success('申请材料智能核验完成')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '智能辅助服务暂不可用')
+    businessBundle.value = await getBusinessMaterials(normalizedBusinessNo)
+    businessNo.value = businessBundle.value.applicationNo || normalizedBusinessNo
+    latestRecognition.value = null
+    ElMessage.success('业务材料已加载')
   } finally {
     loading.value = false
   }
 }
 
 /**
- * @brief 记录人工确认结果，后续可对接业务审核保存接口。
+ * @brief 加载可用材料类型。
  */
-function confirmAudit() {
-  ElMessage.success('核验结果已确认，可继续流转业务审核')
-}
-
-async function copySummary() {
-  if (!auditResult.value) return
-  const summary = `申请类型：${auditResult.value.application_type}；已上传：${auditResult.value.summary.material_count ?? 0}；缺失：${auditResult.value.summary.missing_count ?? 0}；异常：${auditResult.value.summary.abnormal_count ?? 0}；建议：${actionText(auditResult.value.suggested_action)}`
+async function loadMaterialTypes() {
+  materialTypeLoading.value = true
   try {
-    await navigator.clipboard.writeText(summary)
-    ElMessage.success('联调摘要已复制')
-  } catch {
-    ElMessage.info(summary)
+    materialTypes.value = await listEnabledMaterialTypes()
+    if (!selectedMaterialType.value && materialTypes.value.length > 0) {
+      selectedMaterialType.value = materialTypes.value[0].typeCode
+    }
+  } finally {
+    materialTypeLoading.value = false
   }
 }
 
-function actionText(action: SuggestedAction) {
-  return actionTextMap[action]
+/**
+ * @brief 重置页面查询和材料列表。
+ */
+function resetPage() {
+  businessNo.value = ''
+  businessBundle.value = null
 }
 
-function actionTagType(action: SuggestedAction) {
-  if (action === 'ACCEPT') return 'success'
-  if (action === 'REJECT') return 'danger'
+/**
+ * @brief 上传前校验文件格式和大小。
+ *
+ * @param file Element Plus 上传原始文件。
+ * @return 是否允许上传。
+ */
+function validateBeforeUpload(file: UploadRawFile) {
+  const suffix = extractSuffix(file.name)
+  const mimeAllowed = !file.type || allowedMimeTypes.has(file.type)
+  if (!allowedSuffixes.has(suffix) || !mimeAllowed) {
+    ElMessage.warning('材料文件仅支持 JPG、JPEG、PNG 和 PDF 格式')
+    return false
+  }
+  if (file.size > maxFileSize) {
+    ElMessage.warning('单个材料文件不能超过 20MB')
+    return false
+  }
+  return true
+}
+
+/**
+ * @brief 按业务编号上传材料并刷新业务材料包。
+ *
+ * @param options Element Plus 自定义上传参数。
+ */
+async function handleUploadRequest(options: UploadRequestOptions) {
+  if (!businessBundle.value || !selectedMaterialType.value) {
+    options.onError(new Error('缺少业务或材料类型') as never)
+    return
+  }
+  uploading.value = true
+  try {
+    businessBundle.value = await uploadBusinessMaterial(
+      businessBundle.value.applicationNo || String(businessBundle.value.id),
+      selectedMaterialType.value,
+      options.file
+    )
+    await recognizeUploadedMaterial(options.file)
+    options.onSuccess(businessBundle.value as never)
+    ElMessage.success('材料上传成功，已同步到业务申请')
+  } catch (error) {
+    options.onError((error instanceof Error ? error : new Error('材料上传失败')) as never)
+  } finally {
+    uploading.value = false
+  }
+}
+
+/**
+ * @brief 对刚上传材料执行单图分类识别。
+ *
+ * @param file 用户刚上传的材料文件。
+ */
+async function recognizeUploadedMaterial(file: File) {
+  const uploadedMaterial = businessMaterials.value.find((item) => item.originalFileName === file.name) ?? businessMaterials.value[0]
+  if (!businessBundle.value || !uploadedMaterial) return
+  if (!['jpg', 'jpeg', 'png'].includes(uploadedMaterial.fileSuffix?.toLowerCase() || '')) {
+    latestRecognition.value = null
+    return
+  }
+  const response = await recognizeImage('classify', {
+    businessId: businessBundle.value.id,
+    scene: 'MATERIAL_AUDIT',
+    fileUrl: uploadedMaterial.previewUrl,
+    fileName: uploadedMaterial.originalFileName,
+    materialTypeHint: selectedMaterialType.value
+  })
+  if (response.code !== 200 || !response.data) {
+    ElMessage.warning(response.message || '材料即时识别失败，请稍后在算法审核中复核')
+    return
+  }
+  latestRecognition.value = response.data
+}
+
+/**
+ * @brief 预览材料文件。
+ *
+ * @param material 待预览材料。
+ */
+async function previewMaterial(material: RecordMaterial) {
+  currentPreviewMaterial.value = material
+  revokePreviewUrl()
+  if (!['jpg', 'jpeg', 'png', 'pdf'].includes(material.fileSuffix?.toLowerCase() || '')) {
+    previewVisible.value = true
+    return
+  }
+  const blob = await previewRecordMaterial(material.id)
+  previewObjectUrl.value = URL.createObjectURL(blob)
+  previewVisible.value = true
+}
+
+/**
+ * @brief 下载材料文件。
+ *
+ * @param material 待下载材料。
+ */
+async function downloadMaterial(material: RecordMaterial) {
+  const blob = await downloadRecordMaterial(material.id)
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = material.originalFileName || material.fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(objectUrl)
+}
+
+/**
+ * @brief 删除当前业务材料并刷新业务材料包。
+ *
+ * @param material 待删除材料。
+ */
+async function deleteMaterial(material: RecordMaterial) {
+  if (!businessBundle.value) return
+  await ElMessageBox.confirm(`确认删除材料“${material.originalFileName}”吗？删除后该材料会从业务申请中解绑。`, '删除确认', {
+    type: 'warning',
+    confirmButtonText: '删除',
+    cancelButtonText: '取消'
+  })
+  await deleteRecordMaterial(material.id)
+  latestRecognition.value = null
+  businessBundle.value = await getBusinessMaterials(businessBundle.value.applicationNo || String(businessBundle.value.id))
+  ElMessage.success('材料已删除')
+}
+
+function revokePreviewUrl() {
+  if (previewObjectUrl.value) {
+    URL.revokeObjectURL(previewObjectUrl.value)
+    previewObjectUrl.value = ''
+  }
+}
+
+function isBoundMaterial(materialId: number) {
+  return Boolean(businessBundle.value?.materialIds.includes(materialId))
+}
+
+function materialTypeName(typeCode?: string) {
+  return materialTypes.value.find((item) => item.typeCode === typeCode)?.typeName || typeCode || '-'
+}
+
+function businessTypeText(type?: string) {
+  const map: Record<string, string> = {
+    EXEMPTION: '免考管理',
+    COURSE_REPLACE: '课程顶替',
+    TRANSFER: '转入转出',
+    GRADUATION: '毕业管理'
+  }
+  return map[type || ''] || type || '-'
+}
+
+function applicationStatusText(status?: string) {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    SUBMITTED: '已提交',
+    AUDITING: '审核中',
+    APPROVED: '审核通过',
+    REJECTED: '审核驳回',
+    WITHDRAWN: '已撤回'
+  }
+  return map[status || ''] || status || '-'
+}
+
+function applicationStatusTag(status?: string) {
+  if (status === 'APPROVED') return 'success'
+  if (status === 'REJECTED') return 'danger'
+  if (status === 'WITHDRAWN') return 'info'
   return 'warning'
 }
 
-function riskText(level: RiskLevel) {
-  const map: Record<RiskLevel, string> = {
-    LOW: '低',
-    MEDIUM: '中',
-    HIGH: '高'
+function materialAuditStatusText(status?: string) {
+  const map: Record<string, string> = {
+    PENDING: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回'
   }
-  return map[level]
+  return map[status || ''] || status || '-'
 }
 
-function riskTagType(level: RiskLevel) {
-  if (level === 'HIGH') return 'danger'
-  if (level === 'MEDIUM') return 'warning'
-  return 'info'
+function materialAuditStatusTag(status?: string) {
+  if (status === 'APPROVED') return 'success'
+  if (status === 'REJECTED') return 'danger'
+  return 'warning'
 }
 
-function clarityText(level: ClarityLevel) {
-  const map: Record<ClarityLevel, string> = {
-    CLEAR: '清晰',
-    REVIEW: '待复核',
-    BLURRY: '模糊',
-    NOT_IMAGE: '非图片'
+function actionText(action?: SuggestedAction) {
+  const map: Record<SuggestedAction, string> = {
+    ACCEPT: '建议通过',
+    REVIEW: '建议复核',
+    REJECT: '建议驳回'
   }
-  return map[level]
+  return map[action || 'REVIEW']
 }
 
-function clarityTagType(level: ClarityLevel) {
-  if (level === 'CLEAR') return 'success'
-  if (level === 'BLURRY') return 'danger'
-  if (level === 'REVIEW') return 'warning'
-  return 'info'
-}
-
-function formatPreprocessIssues(row: MaterialPreprocessData) {
-  const issues = [...row.format_validation.issues, ...row.clarity.issues]
-  return issues.length ? issues.join('、') : row.clarity.suggestion
+function actionTagType(action?: SuggestedAction) {
+  if (action === 'ACCEPT') return 'success'
+  if (action === 'REJECT') return 'danger'
+  return 'warning'
 }
 
 function formatPercent(value?: number) {
   return `${Number(((value ?? 0) * 100).toFixed(1))}%`
 }
 
-function formatUploadedCategory(code?: string) {
-  return materialTypeOptions.find((item) => item.value === code)?.label ?? code ?? '-'
+function formatFileSize(size?: number) {
+  if (!size) return '0 B'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-/**
- * @brief 将算法类别编码转换为前端类型提示。
- *
- * @param categoryCode 算法识别出的材料类别编码。
- * @return 可再次传给算法服务的中文材料类型提示。
- */
-function categoryNameToHint(categoryCode: string) {
-  const map: Record<string, string> = {
-    ID_CARD: '身份证',
-    ADMISSION_TICKET: '准考证',
-    DIPLOMA: '毕业证',
-    TRANSCRIPT: '成绩单',
-    EXEMPTION_CERTIFICATE: '免考证明',
-    PHOTO: '照片'
-  }
-  return map[categoryCode] ?? ''
-}
-
-/**
- * @brief 当单图分类证据不足时，按申请类型和上传顺序推断当前应补材料。
- *
- * @param currentItem 当前已上传的材料记录。
- * @return 当前申请下最可能的材料类别编码。
- */
-function inferExpectedCategory(currentItem: EditableMaterial) {
-  const requiredCategories = materialRequirementOrder[form.applicationType] ?? materialRequirementOrder.EXEMPTION
-  const usedCategories = new Set(
-    materials.value
-      .filter((item) => item.localId !== currentItem.localId)
-      .map((item) => item.uploadedCategoryCode)
-      .filter(Boolean)
-  )
-  return requiredCategories.find((categoryCode) => !usedCategories.has(categoryCode)) ?? requiredCategories[0] ?? ''
-}
-
-/**
- * @brief 根据材料文件名推断材料类型提示。
- *
- * @param fileName 上传材料文件名。
- * @return 可传递给算法服务的材料类型提示。
- */
-function inferMaterialHint(fileName: string) {
-  const normalizedName = fileName.toLowerCase()
-  if (normalizedName.includes('id') || normalizedName.includes('身份证')) return '身份证'
-  if (normalizedName.includes('transcript') || normalizedName.includes('score') || normalizedName.includes('成绩')) return '成绩单'
-  if (normalizedName.includes('diploma') || normalizedName.includes('毕业') || normalizedName.includes('学历')) return '毕业证'
-  if (normalizedName.includes('exemption') || normalizedName.includes('免考')) return '免考证明'
-  if (normalizedName.includes('ticket') || normalizedName.includes('准考证')) return '准考证'
-  if (normalizedName.includes('photo') || normalizedName.includes('照片')) return '照片'
-  return ''
+function extractSuffix(fileName: string) {
+  const index = fileName.lastIndexOf('.')
+  return index >= 0 ? fileName.slice(index + 1).toLowerCase() : ''
 }
 </script>
 
 <style scoped>
 .material-audit-page {
-  display: grid;
-  gap: 16px;
-}
-
-.material-audit-page :deep(.el-col) {
-  min-width: 0;
-}
-
-.page-heading {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.page-header,
+.card-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
-.page-heading p {
-  margin: 6px 0 0;
-  color: #667085;
+.page-subtitle {
+  margin: -8px 0 0;
+  color: #64748b;
+  font-size: 14px;
 }
 
-.panel {
-  min-width: 0;
-  padding: 18px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+.query-card,
+.info-card,
+.upload-card,
+.table-card {
   border-radius: 8px;
 }
 
-.panel + .panel {
+.query-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+
+.query-form :deep(.el-input) {
+  width: 280px;
+}
+
+.upload-card {
   margin-top: 16px;
 }
 
-.panel-title,
-.material-header,
-.result-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.panel-title {
-  margin-bottom: 14px;
-  color: #111827;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.material-list {
-  display: grid;
-  gap: 12px;
-}
-
-.material-item {
-  min-width: 0;
-  padding: 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-
-.material-header {
-  margin-bottom: 8px;
-  color: #1f2937;
-  font-weight: 700;
-}
-
-.upload-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.upload-field :deep(.el-upload) {
-  flex: 0 0 auto;
-}
-
-.upload-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: #667085;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.submit-button,
-.panel :deep(.el-input-number),
-.panel :deep(.el-select) {
+.upload-card :deep(.el-select),
+.upload-card :deep(.el-upload),
+.upload-card :deep(.el-upload-dragger) {
   width: 100%;
 }
 
-.submit-button {
+.upload-icon {
+  color: #2563eb;
+  font-size: 38px;
+}
+
+.upload-alert,
+.material-table,
+.recognition-card {
   margin-top: 14px;
 }
 
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.metric-item {
-  padding: 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-
-.metric-item span {
-  display: block;
-  color: #667085;
+.material-count {
+  color: #64748b;
   font-size: 13px;
+  font-weight: 400;
 }
 
-.metric-item strong {
-  display: block;
-  margin-top: 6px;
-  color: #111827;
-  font-size: 26px;
-}
-
-.metric-item.warning strong {
-  color: #b45309;
-}
-
-.metric-item.danger strong {
-  color: #b42318;
-}
-
-.result-section {
-  min-width: 0;
-  margin-top: 18px;
-  overflow-x: auto;
-}
-
-.section-title {
-  margin-bottom: 8px;
-  color: #1f2937;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.required-list {
+.preview-body {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  justify-content: center;
+  min-height: 420px;
+  background: #f8fafc;
 }
 
-.result-actions {
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-.preprocess-panel {
-  margin-bottom: 16px;
-}
-
-.clarity-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.preview-body img,
+.preview-body iframe {
+  width: 100%;
+  max-height: 72vh;
+  border: 0;
+  object-fit: contain;
 }
 
 @media (max-width: 768px) {
-  .page-heading,
-  .result-actions {
-    align-items: stretch;
+  .page-header,
+  .card-header {
+    align-items: flex-start;
     flex-direction: column;
   }
 
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .query-form :deep(.el-input) {
+    width: 100%;
   }
 }
 </style>

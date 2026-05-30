@@ -312,6 +312,7 @@
           </el-timeline-item>
         </el-timeline>
 
+        <BusinessMaterialList :business-no="selectedApplication.applicationNo" />
         <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
@@ -365,6 +366,7 @@ import {
   View
 } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import BusinessMaterialList from '../../components/material/BusinessMaterialList.vue'
 import {
   approveCourseReplacementApplication,
   createCourseReplacementRule,

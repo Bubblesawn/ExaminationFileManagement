@@ -1,6 +1,7 @@
 package com.exam.record.service;
 
 import com.exam.record.dto.RecordMaterialUploadDTO;
+import com.exam.record.vo.BusinessMaterialBundleVO;
 import com.exam.record.vo.MaterialFileResourceVO;
 import com.exam.record.vo.RecordMaterialVO;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,6 +22,14 @@ public interface RecordMaterialService {
     List<RecordMaterialVO> listMaterials(Long recordId, String materialType);
 
     /**
+     * @brief 按业务编号查询业务申请及其材料列表。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @return 业务申请材料包。
+     */
+    BusinessMaterialBundleVO getBusinessMaterials(String businessNo);
+
+    /**
      * @brief 上传档案材料。
      *
      * @param dto 材料上传业务字段。
@@ -28,6 +37,16 @@ public interface RecordMaterialService {
      * @return 上传后的材料记录。
      */
     RecordMaterialVO uploadMaterial(RecordMaterialUploadDTO dto, MultipartFile file);
+
+    /**
+     * @brief 按业务编号上传材料并绑定到业务申请。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @param materialType 材料类型编码。
+     * @param file 上传文件。
+     * @return 上传后同步完成的业务申请材料包。
+     */
+    BusinessMaterialBundleVO uploadBusinessMaterial(String businessNo, String materialType, MultipartFile file);
 
     /**
      * @brief 查询材料下载资源。

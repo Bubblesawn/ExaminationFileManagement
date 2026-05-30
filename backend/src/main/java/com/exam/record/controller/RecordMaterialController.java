@@ -3,6 +3,7 @@ package com.exam.record.controller;
 import com.exam.record.common.Result;
 import com.exam.record.dto.RecordMaterialUploadDTO;
 import com.exam.record.service.RecordMaterialService;
+import com.exam.record.vo.BusinessMaterialBundleVO;
 import com.exam.record.vo.MaterialFileResourceVO;
 import com.exam.record.vo.RecordMaterialVO;
 import jakarta.validation.Valid;
@@ -62,6 +63,17 @@ public class RecordMaterialController {
     }
 
     /**
+     * @brief 按业务编号查询业务申请及其材料。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @return 业务申请材料包。
+     */
+    @GetMapping("/business/{businessNo}")
+    public Result<BusinessMaterialBundleVO> getBusinessMaterials(@PathVariable String businessNo) {
+        return Result.success(recordMaterialService.getBusinessMaterials(businessNo));
+    }
+
+    /**
      * @brief 上传档案材料。
      *
      * @param dto 上传业务字段。
@@ -72,6 +84,21 @@ public class RecordMaterialController {
     public Result<RecordMaterialVO> upload(@Valid @ModelAttribute RecordMaterialUploadDTO dto,
                                            @RequestPart("file") MultipartFile file) {
         return Result.success(recordMaterialService.uploadMaterial(dto, file));
+    }
+
+    /**
+     * @brief 按业务编号上传材料并绑定到业务申请。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @param materialType 材料类型编码。
+     * @param file 上传文件。
+     * @return 上传后同步完成的业务申请材料包。
+     */
+    @PostMapping(value = "/business/{businessNo}/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<BusinessMaterialBundleVO> uploadBusinessMaterial(@PathVariable String businessNo,
+                                                                   @RequestParam String materialType,
+                                                                   @RequestPart("file") MultipartFile file) {
+        return Result.success(recordMaterialService.uploadBusinessMaterial(businessNo, materialType, file));
     }
 
     /**

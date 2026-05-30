@@ -31,6 +31,21 @@ export interface RecordMaterial {
   updateTime?: string
 }
 
+export interface BusinessMaterialBundle {
+  id: number
+  applicationNo: string
+  businessType: string
+  recordId: number
+  candidateId?: number
+  applicationTitle?: string
+  applicationStatus?: string
+  currentNodeName?: string
+  applyUserName?: string
+  submitTime?: string
+  materialIds: number[]
+  materials: RecordMaterial[]
+}
+
 /**
  * @brief 查询启用材料类型列表。
  *
@@ -66,6 +81,33 @@ export function uploadRecordMaterial(recordId: number, materialType: string, fil
   return http.post('/materials/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }) as unknown as Promise<RecordMaterial>
+}
+
+/**
+ * @brief 按业务编号查询业务申请和材料列表。
+ *
+ * @param businessNo 业务申请编号或业务申请ID。
+ * @return 业务申请材料包。
+ */
+export function getBusinessMaterials(businessNo: string) {
+  return http.get(`/materials/business/${encodeURIComponent(businessNo)}`) as unknown as Promise<BusinessMaterialBundle>
+}
+
+/**
+ * @brief 按业务编号上传材料并自动绑定到业务申请。
+ *
+ * @param businessNo 业务申请编号或业务申请ID。
+ * @param materialType 材料类型编码。
+ * @param file 待上传材料文件。
+ * @return 上传后同步完成的业务申请材料包。
+ */
+export function uploadBusinessMaterial(businessNo: string, materialType: string, file: File) {
+  const formData = new FormData()
+  formData.append('materialType', materialType)
+  formData.append('file', file)
+  return http.post(`/materials/business/${encodeURIComponent(businessNo)}/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }) as unknown as Promise<BusinessMaterialBundle>
 }
 
 /**

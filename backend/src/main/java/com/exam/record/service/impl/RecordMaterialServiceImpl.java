@@ -2,16 +2,21 @@ package com.exam.record.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.exam.record.common.BusinessException;
 import com.exam.record.dto.RecordMaterialUploadDTO;
+import com.exam.record.entity.BusinessApplication;
 import com.exam.record.entity.MaterialType;
 import com.exam.record.entity.RecordMaterial;
 import com.exam.record.entity.StudentRecord;
+import com.exam.record.mapper.BusinessApplicationMapper;
 import com.exam.record.mapper.MaterialTypeMapper;
 import com.exam.record.mapper.RecordMaterialMapper;
 import com.exam.record.mapper.StudentRecordMapper;
 import com.exam.record.service.RecordMaterialService;
 import com.exam.record.util.AuthContextHolder;
+import com.exam.record.vo.BusinessMaterialBundleVO;
 import com.exam.record.vo.MaterialFileResourceVO;
 import com.exam.record.vo.RecordMaterialVO;
 import com.exam.record.vo.TokenUserVO;
@@ -30,6 +35,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -46,9 +54,12 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         implements RecordMaterialService {
     private static final String AUDIT_STATUS_PENDING = "PENDING";
     private static final Set<String> ALLOWED_SUFFIXES = Set.of("jpg", "jpeg", "png", "pdf");
+    private static final DateTimeFormatter UPLOAD_DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE;
 
     private final StudentRecordMapper studentRecordMapper;
     private final MaterialTypeMapper materialTypeMapper;
+    private final BusinessApplicationMapper businessApplicationMapper;
+    private final ObjectMapper objectMapper;
     private final Path uploadRootPath;
 
     /**
@@ -60,9 +71,13 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
      */
     public RecordMaterialServiceImpl(StudentRecordMapper studentRecordMapper,
                                      MaterialTypeMapper materialTypeMapper,
+                                     BusinessApplicationMapper businessApplicationMapper,
+                                     ObjectMapper objectMapper,
                                      @Value("${file.storage.material-root:uploads/materials}") String uploadRoot) {
         this.studentRecordMapper = studentRecordMapper;
         this.materialTypeMapper = materialTypeMapper;
+        this.businessApplicationMapper = businessApplicationMapper;
+        this.objectMapper = objectMapper;
         this.uploadRootPath = Paths.get(uploadRoot).toAbsolutePath().normalize();
     }
 
@@ -84,6 +99,18 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         }
         wrapper.orderByDesc(RecordMaterial::getCreateTime);
         return list(wrapper).stream().map(RecordMaterialVO::fromEntity).toList();
+    }
+
+    /**
+     * @brief 按业务编号查询业务申请及其材料列表。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @return 业务申请材料包。
+     */
+    @Override
+    public BusinessMaterialBundleVO getBusinessMaterials(String businessNo) {
+        BusinessApplication application = getExistingBusinessApplication(businessNo);
+        return buildBusinessMaterialBundle(application);
     }
 
     /**
@@ -109,7 +136,8 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         String suffix = extractSuffix(originalFileName);
         validateSuffix(suffix);
         String storedFileName = UUID.randomUUID() + "." + suffix;
-        Path relativePath = Paths.get(String.valueOf(dto.getRecordId()), LocalDate.now().toString(), storedFileName);
+        String uploadDate = LocalDate.now().format(UPLOAD_DATE_FORMATTER);
+        Path relativePath = Paths.get(String.valueOf(dto.getRecordId()), uploadDate, storedFileName);
         Path targetPath = uploadRootPath.resolve(relativePath).normalize();
         if (!targetPath.startsWith(uploadRootPath)) {
             throw new BusinessException(400, "文件保存路径非法");
@@ -131,14 +159,33 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         material.setFileSize(file.getSize());
         material.setFileSuffix(suffix);
         material.setMimeType(file.getContentType());
-        material.setPreviewUrl("/api/materials/" + storedFileName + "/preview");
+        material.setPreviewUrl(buildStaticMaterialUrl(dto.getRecordId(), uploadDate, storedFileName));
         material.setUploadUserId(user == null ? null : user.getId());
         material.setAuditStatus(AUDIT_STATUS_PENDING);
         save(material);
         material.setFileUrl("/api/materials/" + material.getId() + "/download");
-        material.setPreviewUrl("/api/materials/" + material.getId() + "/preview");
         updateById(material);
         return RecordMaterialVO.fromEntity(getById(material.getId()));
+    }
+
+    /**
+     * @brief 按业务编号上传材料并绑定到业务申请。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @param materialType 材料类型编码。
+     * @param file 上传文件。
+     * @return 上传后同步完成的业务申请材料包。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public BusinessMaterialBundleVO uploadBusinessMaterial(String businessNo, String materialType, MultipartFile file) {
+        BusinessApplication application = getExistingBusinessApplication(businessNo);
+        RecordMaterialUploadDTO dto = new RecordMaterialUploadDTO();
+        dto.setRecordId(application.getRecordId());
+        dto.setMaterialType(materialType);
+        RecordMaterialVO uploadedMaterial = uploadMaterial(dto, file);
+        appendBusinessMaterialId(application, uploadedMaterial.getId());
+        return buildBusinessMaterialBundle(businessApplicationMapper.selectById(application.getId()));
     }
 
     /**
@@ -182,6 +229,7 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         } catch (IOException exception) {
             throw new BusinessException(500, "材料文件删除失败：" + exception.getMessage());
         }
+        unbindMaterialFromApplications(id);
         removeById(id);
     }
 
@@ -207,6 +255,119 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
             throw new BusinessException(404, "材料不存在");
         }
         return material;
+    }
+
+    /**
+     * @brief 按申请编号或主键 ID 获取业务申请。
+     *
+     * @param businessNo 业务申请编号或业务申请 ID。
+     * @return 已存在的业务申请实体。
+     */
+    private BusinessApplication getExistingBusinessApplication(String businessNo) {
+        if (!StringUtils.hasText(businessNo)) {
+            throw new BusinessException(400, "业务编号不能为空");
+        }
+        String normalizedBusinessNo = businessNo.trim();
+        BusinessApplication application = businessApplicationMapper.selectOne(new LambdaQueryWrapper<BusinessApplication>()
+                .eq(BusinessApplication::getApplicationNo, normalizedBusinessNo)
+                .last("limit 1"));
+        if (application == null && normalizedBusinessNo.matches("\\d+")) {
+            application = businessApplicationMapper.selectById(Long.valueOf(normalizedBusinessNo));
+        }
+        if (application == null) {
+            throw new BusinessException(404, "业务申请不存在");
+        }
+        return application;
+    }
+
+    /**
+     * @brief 生成算法服务可直接访问的材料静态地址。
+     *
+     * @param recordId 考籍档案 ID。
+     * @param uploadDate 上传日期目录。
+     * @param fileName 系统保存文件名。
+     * @return 静态材料访问地址。
+     */
+    private String buildStaticMaterialUrl(Long recordId, String uploadDate, String fileName) {
+        return "/uploads/materials/" + recordId + "/" + uploadDate + "/" + fileName;
+    }
+
+    /**
+     * @brief 组装业务申请材料包。
+     *
+     * @param application 业务申请实体。
+     * @return 业务申请材料包。
+     */
+    private BusinessMaterialBundleVO buildBusinessMaterialBundle(BusinessApplication application) {
+        List<RecordMaterialVO> materials = listMaterials(application.getRecordId(), null);
+        return BusinessMaterialBundleVO.fromEntity(application, parseMaterialIds(application), materials);
+    }
+
+    /**
+     * @brief 将新上传材料追加绑定到业务申请材料 ID 列表。
+     *
+     * @param application 业务申请实体。
+     * @param materialId 新上传材料 ID。
+     */
+    private void appendBusinessMaterialId(BusinessApplication application, Long materialId) {
+        List<Long> materialIds = parseMaterialIds(application);
+        LinkedHashSet<Long> mergedMaterialIds = new LinkedHashSet<>(materialIds);
+        mergedMaterialIds.add(materialId);
+        application.setMaterialIdsJson(writeMaterialIds(new ArrayList<>(mergedMaterialIds)));
+        businessApplicationMapper.updateById(application);
+    }
+
+    /**
+     * @brief 从所有业务申请中解绑指定材料 ID。
+     *
+     * @param materialId 待解绑材料 ID。
+     */
+    private void unbindMaterialFromApplications(Long materialId) {
+        List<BusinessApplication> applications = businessApplicationMapper.selectList(new LambdaQueryWrapper<BusinessApplication>()
+                .isNotNull(BusinessApplication::getMaterialIdsJson));
+        for (BusinessApplication application : applications) {
+            List<Long> materialIds = parseMaterialIds(application);
+            if (!materialIds.contains(materialId)) {
+                continue;
+            }
+            List<Long> nextMaterialIds = materialIds.stream()
+                    .filter(id -> !materialId.equals(id))
+                    .toList();
+            application.setMaterialIdsJson(writeMaterialIds(nextMaterialIds));
+            businessApplicationMapper.updateById(application);
+        }
+    }
+
+    /**
+     * @brief 读取业务申请材料 ID 列表。
+     *
+     * @param application 业务申请实体。
+     * @return 材料 ID 列表。
+     */
+    private List<Long> parseMaterialIds(BusinessApplication application) {
+        if (!StringUtils.hasText(application.getMaterialIdsJson())) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(application.getMaterialIdsJson(), new TypeReference<List<Long>>() {
+            });
+        } catch (Exception exception) {
+            throw new BusinessException(500, "业务申请材料读取失败：" + exception.getMessage());
+        }
+    }
+
+    /**
+     * @brief 写出业务申请材料 ID 列表 JSON。
+     *
+     * @param materialIds 材料 ID 列表。
+     * @return JSON 字符串。
+     */
+    private String writeMaterialIds(List<Long> materialIds) {
+        try {
+            return objectMapper.writeValueAsString(materialIds == null ? List.of() : materialIds);
+        } catch (Exception exception) {
+            throw new BusinessException(500, "业务申请材料保存失败：" + exception.getMessage());
+        }
     }
 
     private String extractSuffix(String fileName) {

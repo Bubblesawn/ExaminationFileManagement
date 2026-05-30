@@ -245,6 +245,7 @@
           </el-timeline-item>
         </el-timeline>
 
+        <BusinessMaterialList :business-no="selectedApplication.applicationNo" />
         <ApplicationMaterialAuditPanel :application-id="selectedApplication.id" />
       </template>
     </el-drawer>
@@ -319,6 +320,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, DocumentChecked, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import BusinessMaterialList from '../../components/material/BusinessMaterialList.vue'
 import {
   approveGraduationApplication,
   checkGraduationEligibility,
