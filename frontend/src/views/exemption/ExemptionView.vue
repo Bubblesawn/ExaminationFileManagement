@@ -123,6 +123,7 @@
             :remote-method="searchStudentRecords"
             :loading="recordLoading"
             placeholder="输入考籍号、姓名或身份证号搜索"
+            @change="handleRecordChange"
             @visible-change="handleRecordSelectVisible"
           >
             <el-option
@@ -148,8 +149,25 @@
         <el-form-item label="免考原因" prop="exemptionReason">
           <el-input v-model="form.exemptionReason" type="textarea" :rows="4" maxlength="512" show-word-limit />
         </el-form-item>
-        <el-form-item label="材料ID">
-          <el-input v-model="materialIdsText" placeholder="多个材料ID用英文逗号分隔" />
+        <el-form-item label="申请材料">
+          <el-select
+            v-model="selectedMaterialIds"
+            class="material-select"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            :disabled="!form.recordId"
+            :loading="materialLoading"
+            :placeholder="form.recordId ? '请选择当前档案材料' : '请先选择考籍档案'"
+          >
+            <el-option
+              v-for="material in materialOptions"
+              :key="material.id"
+              :label="formatMaterialOption(material)"
+              :value="material.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="3" maxlength="512" show-word-limit />
@@ -175,7 +193,7 @@
           <el-descriptions-item label="来源课程">
             {{ formatCourse(selectedApplication.sourceCourseCode, selectedApplication.sourceCourseName) }}
           </el-descriptions-item>
-          <el-descriptions-item label="材料ID" :span="2">
+          <el-descriptions-item label="申请材料" :span="2">
             {{ selectedApplication.materialIds?.length ? selectedApplication.materialIds.join('、') : '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="免考原因" :span="2">
@@ -251,6 +269,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import { listRecordMaterials, type RecordMaterial } from '../../api/material'
 import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   approveExemptionApplication,
@@ -268,8 +287,10 @@ import {
 const loading = ref(false)
 const saving = ref(false)
 const recordLoading = ref(false)
+const materialLoading = ref(false)
 const applications = ref<ExemptionApplication[]>([])
 const recordOptions = ref<StudentRecord[]>([])
+const materialOptions = ref<RecordMaterial[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
 const detailDrawerVisible = ref(false)
@@ -280,7 +301,7 @@ const auditMode = ref<'approve' | 'reject'>('approve')
 const selectedApplication = ref<ExemptionApplication | null>(null)
 const flowRecords = ref<ExemptionFlowRecord[]>([])
 const formRef = ref<FormInstance>()
-const materialIdsText = ref('')
+const selectedMaterialIds = ref<number[]>([])
 
 const query = reactive({
   pageNo: 1,
@@ -360,7 +381,8 @@ function openCreateDrawer() {
     exemptionReason: '',
     remark: ''
   })
-  materialIdsText.value = ''
+  selectedMaterialIds.value = []
+  materialOptions.value = []
   formDrawerVisible.value = true
   searchStudentRecords('')
   formRef.value?.clearValidate()
@@ -415,6 +437,49 @@ function formatRecordOption(record: StudentRecord) {
   return `${record.recordNo} / ${candidateName}${idCard}${majorName}`
 }
 
+/**
+ * @brief 切换考籍档案后加载该档案已上传材料。
+ *
+ * @details
+ * 申请材料必须归属于当前考籍档案；切换档案时清空原材料选择，避免跨档案提交。
+ *
+ * @param recordId 当前选中的考籍档案主键。
+ */
+async function handleRecordChange(recordId?: number) {
+  selectedMaterialIds.value = []
+  await loadRecordMaterials(recordId)
+}
+
+/**
+ * @brief 加载指定考籍档案的材料列表。
+ *
+ * @param recordId 考籍档案主键。
+ */
+async function loadRecordMaterials(recordId?: number) {
+  if (!recordId) {
+    materialOptions.value = []
+    return
+  }
+
+  materialLoading.value = true
+  try {
+    materialOptions.value = await listRecordMaterials({ recordId })
+  } finally {
+    materialLoading.value = false
+  }
+}
+
+/**
+ * @brief 格式化材料选项，展示材料类型、原始文件名和审核状态。
+ *
+ * @param material 档案材料摘要。
+ * @return 下拉框展示文本。
+ */
+function formatMaterialOption(material: RecordMaterial) {
+  const fileName = material.originalFileName || material.fileName || `材料${material.id}`
+  return `${material.materialType} / ${fileName} / ${auditStatusText(material.auditStatus)}`
+}
+
 async function openEditDrawer(row: ExemptionApplication) {
   formMode.value = 'edit'
   selectedApplication.value = await getExemptionApplicationDetail(row.id)
@@ -428,7 +493,8 @@ async function openEditDrawer(row: ExemptionApplication) {
     exemptionReason: selectedApplication.value.exemptionReason || '',
     remark: selectedApplication.value.remark || ''
   })
-  materialIdsText.value = (selectedApplication.value.materialIds || []).join(',')
+  selectedMaterialIds.value = [...(selectedApplication.value.materialIds || [])]
+  await loadRecordMaterials(selectedApplication.value.recordId)
   formDrawerVisible.value = true
   formRef.value?.clearValidate()
 }
@@ -472,7 +538,7 @@ async function submitForm() {
       sourceCourseCode: form.sourceCourseCode || undefined,
       sourceCourseName: form.sourceCourseName || undefined,
       exemptionReason: form.exemptionReason,
-      materialIds: parseMaterialIds(),
+      materialIds: selectedMaterialIds.value,
       remark: form.remark || undefined
     }
     if (formMode.value === 'create') {
@@ -526,16 +592,6 @@ async function submitWithdraw() {
   }
 }
 
-function parseMaterialIds() {
-  if (!materialIdsText.value.trim()) {
-    return []
-  }
-  return materialIdsText.value
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((item) => Number.isFinite(item) && item > 0)
-}
-
 function formatCourse(code?: string, name?: string) {
   if (code && name) return `${code} / ${name}`
   return code || name || '-'
@@ -557,6 +613,15 @@ function applicationStatusTag(status?: string) {
   if (status === 'REJECTED') return 'danger'
   if (status === 'WITHDRAWN') return 'info'
   return 'warning'
+}
+
+function auditStatusText(status?: string) {
+  const statusMap: Record<string, string> = {
+    PENDING: '待审核',
+    APPROVED: '已通过',
+    REJECTED: '已驳回'
+  }
+  return statusMap[status || ''] || status || '-'
 }
 
 function flowActionText(action?: string) {
@@ -608,7 +673,8 @@ onMounted(loadApplications)
   width: 180px;
 }
 
-.record-select {
+.record-select,
+.material-select {
   width: 100%;
 }
 
