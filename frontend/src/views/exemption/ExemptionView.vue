@@ -112,8 +112,26 @@
 
     <el-drawer v-model="formDrawerVisible" :title="formMode === 'create' ? '新增免考申请' : '编辑免考申请'" size="720px">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="120px">
-        <el-form-item v-if="formMode === 'create'" label="考籍档案ID" prop="recordId">
-          <el-input-number v-model="form.recordId" :min="1" controls-position="right" />
+        <el-form-item v-if="formMode === 'create'" label="考籍档案" prop="recordId">
+          <el-select
+            v-model="form.recordId"
+            class="record-select"
+            filterable
+            remote
+            clearable
+            reserve-keyword
+            :remote-method="searchStudentRecords"
+            :loading="recordLoading"
+            placeholder="输入考籍号、姓名或身份证号搜索"
+            @visible-change="handleRecordSelectVisible"
+          >
+            <el-option
+              v-for="record in recordOptions"
+              :key="record.id"
+              :label="formatRecordOption(record)"
+              :value="record.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="免考课程代码" prop="courseCode">
           <el-input v-model="form.courseCode" placeholder="例如：00015" maxlength="32" show-word-limit />
@@ -233,6 +251,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, CircleClose, Edit, Plus, Refresh, RefreshLeft, Search, View } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
+import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   approveExemptionApplication,
   getExemptionApplicationDetail,
@@ -248,7 +267,9 @@ import {
 
 const loading = ref(false)
 const saving = ref(false)
+const recordLoading = ref(false)
 const applications = ref<ExemptionApplication[]>([])
+const recordOptions = ref<StudentRecord[]>([])
 const total = ref(0)
 const formDrawerVisible = ref(false)
 const detailDrawerVisible = ref(false)
@@ -288,7 +309,7 @@ const withdrawForm = reactive({
 })
 
 const formRules: FormRules = {
-  recordId: [{ required: true, message: '请输入考籍档案ID', trigger: 'blur' }],
+  recordId: [{ required: true, message: '请选择考籍档案', trigger: 'change' }],
   courseCode: [{ required: true, message: '请输入免考课程代码', trigger: 'blur' }],
   courseName: [{ required: true, message: '请输入免考课程名称', trigger: 'blur' }],
   exemptionReason: [{ required: true, message: '请输入免考原因', trigger: 'blur' }]
@@ -328,6 +349,7 @@ function resetQuery() {
 function openCreateDrawer() {
   formMode.value = 'create'
   selectedApplication.value = null
+  recordOptions.value = []
   Object.assign(form, {
     id: 0,
     recordId: undefined,
@@ -340,7 +362,57 @@ function openCreateDrawer() {
   })
   materialIdsText.value = ''
   formDrawerVisible.value = true
+  searchStudentRecords('')
   formRef.value?.clearValidate()
+}
+
+/**
+ * @brief 远程搜索考籍档案，供免考新增申请选择真实档案主键。
+ *
+ * @details
+ * 免考接口提交时需要考籍档案主键 recordId；页面展示给用户的是考籍号、姓名、
+ * 身份证号等业务信息，避免用户误将考籍号手工填写为主键导致“考籍档案不存在”。
+ *
+ * @param keyword 考籍号、考生姓名或身份证号关键字。
+ */
+async function searchStudentRecords(keyword: string) {
+  recordLoading.value = true
+  try {
+    const result = await pageStudentRecords({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      recordStatus: 'NORMAL',
+      archiveStatus: 'UNARCHIVED'
+    })
+    recordOptions.value = result.records ?? []
+  } finally {
+    recordLoading.value = false
+  }
+}
+
+/**
+ * @brief 首次展开考籍档案下拉框时加载可申请免考的档案。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRecordSelectVisible(visible: boolean) {
+  if (visible && recordOptions.value.length === 0) {
+    searchStudentRecords('')
+  }
+}
+
+/**
+ * @brief 格式化考籍档案选项，帮助经办人员确认选中的档案。
+ *
+ * @param record 考籍档案摘要。
+ * @return 下拉框展示文本。
+ */
+function formatRecordOption(record: StudentRecord) {
+  const candidateName = record.candidateName || '未知考生'
+  const idCard = record.idCard ? ` / ${record.idCard}` : ''
+  const majorName = record.majorName ? ` / ${record.majorName}` : ''
+  return `${record.recordNo} / ${candidateName}${idCard}${majorName}`
 }
 
 async function openEditDrawer(row: ExemptionApplication) {
@@ -534,6 +606,10 @@ onMounted(loadApplications)
 
 .query-form :deep(.el-select) {
   width: 180px;
+}
+
+.record-select {
+  width: 100%;
 }
 
 .pagination-wrapper {
