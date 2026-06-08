@@ -41,6 +41,7 @@ from app.services.image_analysis_service import (
     relative_bbox,
     scale_template_bbox,
 )
+from app.services.yolo_classify_service import build_yolo_material_candidates
 
 SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SUPPORTED_DOCUMENT_SUFFIXES = (".pdf",)
@@ -454,6 +455,10 @@ def _build_material_candidates(
     @param analysis 图片视觉分析结果。
     @return 按置信度倒序排列的材料类别候选项。
     """
+    yolo_candidates = build_yolo_material_candidates(request, analysis)
+    if yolo_candidates:
+        return yolo_candidates
+
     strong_text = _normalize_text(request.file_name)
     weak_text = _normalize_text(request.material_type_hint)
     candidates = [
