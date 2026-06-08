@@ -236,6 +236,7 @@ class ImageSegmentResult(BaseModel):
 
     business_id: int | None = Field(default=None, description="业务ID")
     file_url: str = Field(..., description="图片文件地址")
+    segmentation_image_url: str | None = Field(default=None, description="图像分割可视化结果图访问地址")
     scene: str | None = Field(default=None, description="业务场景")
     material_type_hint: str | None = Field(default=None, description="材料类型提示")
     category_code: str = Field(..., description="匹配到的材料类别编码")

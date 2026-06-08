@@ -42,6 +42,11 @@ from app.services.image_analysis_service import (
     scale_template_bbox,
 )
 from app.services.yolo_classify_service import build_yolo_material_candidates
+from app.services.yolo_segment_service import (
+    build_yolo_material_segments,
+    write_polygon_mask_image,
+    write_segmentation_preview_image,
+)
 
 SUPPORTED_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 SUPPORTED_DOCUMENT_SUFFIXES = (".pdf",)
@@ -608,7 +613,14 @@ def _build_document_segment(category_code: str, analysis: ImageAnalysis) -> Mate
         confidence=estimate_visual_confidence(0.9, analysis),
         bbox=bbox,
         polygon=_rectangle_to_polygon(bbox),
-        mask_url=f"/mock/masks/{category_code.lower()}-document.png",
+        mask_url=write_polygon_mask_image(
+            "fallback-document",
+            category_code,
+            1,
+            _rectangle_to_polygon(bbox),
+            image_width,
+            image_height,
+        ),
         area_ratio=round((bbox.width * bbox.height) / (image_width * image_height), 4),
         extraction_priority=1,
         need_manual_review=not analysis.loaded or bool(analysis.issues),
@@ -660,7 +672,14 @@ def _build_segments(category_code: str, file_url: str, analysis: ImageAnalysis |
                 confidence=max(0.0, round(detected_object.confidence - 0.03, 2)),
                 bbox=bbox,
                 polygon=_rectangle_to_polygon(bbox),
-                mask_url=f"/mock/masks/{category_code.lower()}-{detected_object.object_code.lower()}.png",
+                mask_url=write_polygon_mask_image(
+                    f"fallback-{detected_object.object_code}",
+                    category_code,
+                    index,
+                    _rectangle_to_polygon(bbox),
+                    image_width,
+                    image_height,
+                ),
                 area_ratio=area_ratio,
                 extraction_priority=index,
                 need_manual_review=is_risk_segment,
@@ -1129,14 +1148,20 @@ def segment_image(request: ImageTaskRequest) -> dict:
         return _fail(415, "文件格式不支持")
     analysis = analyze_image(request.file_url)
     quality = _check_image_quality(request.file_url, analysis)
-    category_code = _match_material_category(request, analysis)
-    category_name = MATERIAL_CATEGORY_RULES.get(category_code, {"name": UNKNOWN_MATERIAL_NAME})["name"]
-    segments = _build_segments(category_code, request.file_url, analysis)
+    yolo_segment_result = build_yolo_material_segments(request.file_url, analysis)
+    if yolo_segment_result:
+        category_code, category_name, segments, segmentation_image_url = yolo_segment_result
+    else:
+        category_code = UNKNOWN_MATERIAL_CODE
+        category_name = UNKNOWN_MATERIAL_NAME
+        segments = []
+        segmentation_image_url = None
     has_review_segment = any(item.need_manual_review for item in segments)
     suggested_action = "REJECT" if not quality.readable or not segments else "REVIEW" if has_review_segment else "ACCEPT"
     result = ImageSegmentResult(
         business_id=request.business_id,
         file_url=request.file_url,
+        segmentation_image_url=segmentation_image_url,
         scene=request.scene,
         material_type_hint=request.material_type_hint,
         category_code=category_code,

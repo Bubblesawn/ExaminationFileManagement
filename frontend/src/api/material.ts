@@ -41,6 +41,9 @@ export interface BusinessMaterialBundle {
   applicationStatus?: string
   currentNodeName?: string
   applyUserName?: string
+  auditUserId?: number
+  auditUserName?: string
+  auditTime?: string
   submitTime?: string
   materialIds: number[]
   materials: RecordMaterial[]
@@ -94,6 +97,16 @@ export function getBusinessMaterials(businessNo: string) {
 }
 
 /**
+ * @brief 按提交用户或审核用户查询业务申请和材料列表。
+ *
+ * @param recordId 考籍档案ID。
+ * @return 考籍档案相关业务申请材料包列表。
+ */
+export function listRecordBusinessMaterials(recordId: number) {
+  return http.get(`/materials/records/${recordId}/businesses`) as unknown as Promise<BusinessMaterialBundle[]>
+}
+
+/**
  * @brief 按业务编号上传材料并自动绑定到业务申请。
  *
  * @param businessNo 业务申请编号或业务申请ID。
@@ -108,6 +121,16 @@ export function uploadBusinessMaterial(businessNo: string, materialType: string,
   return http.post(`/materials/business/${encodeURIComponent(businessNo)}/upload`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }) as unknown as Promise<BusinessMaterialBundle>
+}
+
+/**
+ * @brief 审核通过单条档案材料。
+ *
+ * @param id 材料ID。
+ * @return 审核通过后的材料记录。
+ */
+export function approveRecordMaterial(id: number) {
+  return http.put(`/materials/${id}/approve`) as unknown as Promise<RecordMaterial>
 }
 
 /**

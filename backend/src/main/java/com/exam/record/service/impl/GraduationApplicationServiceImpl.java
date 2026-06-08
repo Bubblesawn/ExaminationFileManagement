@@ -177,8 +177,8 @@ public class GraduationApplicationServiceImpl extends ServiceImpl<BusinessApplic
      * @brief 校验指定考籍档案是否具备毕业申请资格。
      *
      * @details
-     * 校验项优先使用当前系统已具备的数据：考籍状态必须为 NORMAL、考籍基础字段需完整、
-     * 考生身份信息需完整、至少存在一份毕业申请材料，且毕业材料应全部审核通过。
+     * 校验项优先使用当前系统已具备的数据：考籍状态必须为 NORMAL、考生身份信息需完整、
+     * 至少存在一份毕业申请材料，且毕业材料应全部审核通过。
      * 该方法不修改数据库，可被提交、修改和前端预检查接口复用。
      *
      * @param recordId 考籍档案 ID。
@@ -198,12 +198,6 @@ public class GraduationApplicationServiceImpl extends ServiceImpl<BusinessApplic
             passedItems.add("考籍状态正常");
         } else {
             failedItems.add("考籍状态不是NORMAL，当前为" + safeText(record.getRecordStatus()));
-        }
-        if (StringUtils.hasText(record.getRecordNo()) && StringUtils.hasText(record.getMajorName())
-                && StringUtils.hasText(record.getEducationLevel())) {
-            passedItems.add("考籍号、专业和层次信息完整");
-        } else {
-            failedItems.add("考籍号、专业或层次信息不完整");
         }
         if (candidate != null && StringUtils.hasText(candidate.getName()) && StringUtils.hasText(candidate.getIdCard())) {
             passedItems.add("考生身份信息完整");

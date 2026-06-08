@@ -100,6 +100,7 @@ export interface MaterialSegment {
 export interface AiRecognitionData {
   business_id?: number
   file_url?: string
+  segmentation_image_url?: string
   scene?: string
   material_type_hint?: string
   category_code?: string

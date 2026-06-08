@@ -95,3 +95,27 @@ def test_application_material_audit_empty_materials_is_controlled_response() -> 
     assert body["code"] == 200
     assert body["data"]["suggested_action"] == "REJECT"
     assert body["data"]["missing_materials"]
+
+
+def test_image_segment_keeps_rule_fallback_when_yolo_unavailable(monkeypatch) -> None:
+    """@brief YOLO 分割模型不可用时图像分割接口仍返回可控兜底响应。"""
+
+    monkeypatch.setattr(
+        "app.services.mock_algorithm_service.build_yolo_material_segments",
+        lambda file_url, analysis=None: None,
+    )
+    response = client.post(
+        "/api/image-segment",
+        headers=headers,
+        json={
+            "file_url": "D:/tmp/id-card.jpg",
+            "file_name": "id-card.jpg",
+            "material_type_hint": "ID_CARD",
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["code"] == 200
+    assert body["data"]["segments"] == []
+    assert body["data"]["suggested_action"] == "REJECT"

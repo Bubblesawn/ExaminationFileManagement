@@ -30,6 +30,14 @@ public interface RecordMaterialService {
     BusinessMaterialBundleVO getBusinessMaterials(String businessNo);
 
     /**
+     * @brief 按考籍档案查询业务申请材料包列表。
+     *
+     * @param recordId 考籍档案ID。
+     * @return 考籍档案相关业务申请材料包列表。
+     */
+    List<BusinessMaterialBundleVO> listRecordBusinessMaterials(Long recordId);
+
+    /**
      * @brief 上传档案材料。
      *
      * @param dto 材料上传业务字段。
@@ -47,6 +55,14 @@ public interface RecordMaterialService {
      * @return 上传后同步完成的业务申请材料包。
      */
     BusinessMaterialBundleVO uploadBusinessMaterial(String businessNo, String materialType, MultipartFile file);
+
+    /**
+     * @brief 审核通过单条档案材料。
+     *
+     * @param id 材料ID。
+     * @return 审核通过后的材料记录。
+     */
+    RecordMaterialVO approveMaterial(Long id);
 
     /**
      * @brief 查询材料下载资源。

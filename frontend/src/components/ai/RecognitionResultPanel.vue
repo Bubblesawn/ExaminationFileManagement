@@ -18,8 +18,19 @@
         <el-col :xs="24" :md="10">
           <div class="summary-block">
             <div class="preview-box">
-              <img v-if="previewImageUrl" :src="previewImageUrl" alt="材料预览" />
+              <el-image
+                v-if="previewImageUrl"
+                class="preview-image"
+                :src="previewImageUrl"
+                :preview-src-list="[previewImageUrl]"
+                fit="contain"
+                preview-teleported
+              />
               <div v-else class="preview-placeholder">未提供图片地址</div>
+            </div>
+            <div v-if="isSegmentResult && segmentationImageUrl" class="preview-actions">
+              <el-tag type="success" effect="light">分割结果图</el-tag>
+              <el-button text type="primary" @click="openPreviewImage">预览大图</el-button>
             </div>
 
             <el-descriptions :column="1" border size="small">
@@ -138,6 +149,13 @@
           <el-table-column prop="remark" label="备注" min-width="180" />
         </el-table>
       </div>
+      <el-alert
+        v-else-if="editableResult.segmentation_image_url === null && resultTitle === '图像分割'"
+        class="result-section"
+        type="warning"
+        show-icon
+        title="未检测到可分割材料区域，请上传单张、清晰的材料图片后重试。"
+      />
 
       <div class="panel-footer">
         <el-button @click="resetResult">恢复识别值</el-button>
@@ -175,7 +193,9 @@ const resultTitle = computed(() => props.taskName || '请先发起图片识别')
 const candidateRows = computed<MaterialCategoryCandidate[]>(() => editableResult.value.candidates ?? [])
 const objectRows = computed<DetectedObject[]>(() => editableResult.value.objects ?? [])
 const segmentRows = computed<MaterialSegment[]>(() => editableResult.value.segments ?? [])
-const previewImageUrl = computed(() => buildPreviewImageUrl(editableResult.value.file_url))
+const isSegmentResult = computed(() => segmentRows.value.length > 0)
+const segmentationImageUrl = computed(() => buildPreviewImageUrl(editableResult.value.segmentation_image_url))
+const previewImageUrl = computed(() => segmentationImageUrl.value || buildPreviewImageUrl(editableResult.value.file_url))
 
 const confidencePercent = computed({
   get: () => Number(((editableResult.value.confidence ?? 0) * 100).toFixed(1)),
@@ -233,6 +253,15 @@ function confirmResult() {
     result: cloneResult(editableResult.value),
     remark: manualRemark.value.trim()
   })
+}
+
+/**
+ * @brief 在新标签页中打开当前预览图片，便于审核人员查看分割细节。
+ */
+function openPreviewImage() {
+  if (previewImageUrl.value) {
+    window.open(previewImageUrl.value, '_blank', 'noopener,noreferrer')
+  }
 }
 
 /**
@@ -333,11 +362,19 @@ function riskTagType(level: DetectedObject['risk_level']) {
   border-radius: 8px;
 }
 
-.preview-box img {
+.preview-image,
+.preview-box :deep(.el-image__inner) {
   display: block;
   width: 100%;
   max-height: 260px;
   object-fit: contain;
+}
+
+.preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .preview-placeholder {

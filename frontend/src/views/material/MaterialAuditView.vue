@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">材料审核</h2>
-        <p class="page-subtitle">按业务编号定位免考、课程顶替、转入转出和毕业业务，上传材料后自动同步到对应业务。</p>
+        <p class="page-subtitle">按业务编号或考生考籍定位免考、课程顶替、转入转出和毕业业务，上传材料后自动同步到对应业务。</p>
       </div>
       <el-tag v-if="businessBundle" :type="applicationStatusTag(businessBundle.applicationStatus)" effect="light">
         {{ applicationStatusText(businessBundle.applicationStatus) }}
@@ -12,22 +12,84 @@
 
     <el-card shadow="never" class="query-card">
       <el-form :inline="true" class="query-form" @submit.prevent>
-        <el-form-item label="业务编号">
+        <el-form-item label="查询方式">
+          <el-radio-group v-model="queryMode">
+            <el-radio-button label="business">业务编号</el-radio-button>
+            <el-radio-button label="record">考生</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="queryMode === 'business'" label="业务编号">
           <el-input
             v-model="businessNo"
             clearable
             placeholder="请输入业务编号或业务ID"
-            @keyup.enter="loadBusinessMaterials"
+            @keyup.enter="handleSearch"
           />
         </el-form-item>
+        <el-form-item v-else label="考生考籍">
+          <el-select
+            v-model="selectedRecordId"
+            class="record-select"
+            clearable
+            filterable
+            remote
+            reserve-keyword
+            :remote-method="searchStudentRecords"
+            :loading="recordLoading"
+            placeholder="请输入考籍号、姓名或身份证号搜索"
+            @keyup.enter="handleSearch"
+            @change="handleRecordChange"
+            @visible-change="handleRecordSelectVisible"
+          >
+            <el-option
+              v-for="record in recordOptions"
+              :key="record.id"
+              :label="formatRecordOption(record)"
+              :value="record.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item>
-          <el-button type="primary" :icon="Search" :loading="loading" @click="loadBusinessMaterials">查询业务</el-button>
+          <el-button type="primary" :icon="Search" :loading="loading" @click="handleSearch">{{ queryButtonText }}</el-button>
           <el-button :icon="Refresh" @click="resetPage">重置</el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
-    <el-empty v-if="!businessBundle && !loading" description="请输入业务编号查询待上传材料的业务" />
+    <el-card v-if="queryMode === 'record' && recordBundles.length > 0" shadow="never" class="result-card">
+      <template #header>
+        <div class="card-header">
+          <span>考生相关业务</span>
+          <span class="material-count">共 {{ recordBundles.length }} 条</span>
+        </div>
+      </template>
+      <el-table :data="recordBundles" border highlight-current-row @row-click="selectBusinessBundle">
+        <el-table-column prop="applicationNo" label="业务编号" min-width="140" show-overflow-tooltip />
+        <el-table-column label="业务类型" min-width="120">
+          <template #default="{ row }">{{ businessTypeText(row.businessType) }}</template>
+        </el-table-column>
+        <el-table-column prop="applicationTitle" label="业务标题" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="applyUserName" label="提交人" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="auditUserName" label="审核人" min-width="120" show-overflow-tooltip />
+        <el-table-column label="状态" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="applicationStatusTag(row.applicationStatus)" size="small">
+              {{ applicationStatusText(row.applicationStatus) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="材料数" width="90" align="center">
+          <template #default="{ row }">{{ row.materialIds.length }}/{{ row.materials.length }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :icon="View" @click.stop="selectBusinessBundle(row)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-empty v-if="!businessBundle && !loading" :description="emptyDescription" />
 
     <template v-else-if="businessBundle">
       <el-row :gutter="16">
@@ -47,6 +109,8 @@
               <el-descriptions-item label="当前节点">{{ businessBundle.currentNodeName || '-' }}</el-descriptions-item>
               <el-descriptions-item label="提交人">{{ businessBundle.applyUserName || '-' }}</el-descriptions-item>
               <el-descriptions-item label="提交时间">{{ businessBundle.submitTime || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="审核人">{{ businessBundle.auditUserName || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="审核时间">{{ businessBundle.auditTime || '-' }}</el-descriptions-item>
             </el-descriptions>
           </el-card>
 
@@ -104,7 +168,7 @@
             <template #header>
               <div class="card-header">
                 <span>业务材料</span>
-                <el-button text type="primary" :icon="Refresh" :loading="loading" @click="loadBusinessMaterials">
+                <el-button text type="primary" :icon="Refresh" :loading="loading" @click="refreshCurrentMaterials">
                   刷新
                 </el-button>
               </div>
@@ -139,10 +203,18 @@
                 </template>
               </el-table-column>
               <el-table-column prop="createTime" label="上传时间" min-width="170" show-overflow-tooltip />
-              <el-table-column label="操作" width="220" fixed="right">
+              <el-table-column label="操作" width="300" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="primary" :icon="View" @click="previewMaterial(row)">预览</el-button>
                   <el-button link type="primary" :icon="Download" @click="downloadMaterial(row)">下载</el-button>
+                  <el-button
+                    v-if="row.auditStatus !== 'APPROVED'"
+                    link
+                    type="success"
+                    @click="approveMaterial(row)"
+                  >
+                    审核通过
+                  </el-button>
                   <el-button link type="danger" :icon="Delete" @click="deleteMaterial(row)">删除</el-button>
                 </template>
               </el-table-column>
@@ -192,10 +264,13 @@ import { ElMessage, ElMessageBox, type UploadRequestOptions, type UploadRawFile 
 import { Delete, Download, Refresh, Search, UploadFilled, View } from '@element-plus/icons-vue'
 import ApplicationMaterialAuditPanel from '../../components/ai/ApplicationMaterialAuditPanel.vue'
 import { recognizeImage, type AiRecognitionData, type SuggestedAction } from '../../api/ai'
+import { pageStudentRecords, type StudentRecord } from '../../api/record'
 import {
   downloadRecordMaterial,
   deleteRecordMaterial,
+  approveRecordMaterial,
   getBusinessMaterials,
+  listRecordBusinessMaterials,
   listEnabledMaterialTypes,
   previewRecordMaterial,
   uploadBusinessMaterial,
@@ -209,10 +284,15 @@ const allowedSuffixes = new Set(['jpg', 'jpeg', 'png', 'pdf'])
 const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'application/pdf'])
 
 const businessNo = ref('')
+const selectedRecordId = ref<number | undefined>()
+const queryMode = ref<'business' | 'record'>('business')
 const loading = ref(false)
 const uploading = ref(false)
+const recordLoading = ref(false)
 const materialTypeLoading = ref(false)
 const businessBundle = ref<BusinessMaterialBundle | null>(null)
+const recordBundles = ref<BusinessMaterialBundle[]>([])
+const recordOptions = ref<StudentRecord[]>([])
 const materialTypes = ref<MaterialType[]>([])
 const selectedMaterialType = ref('')
 const previewVisible = ref(false)
@@ -220,6 +300,10 @@ const previewObjectUrl = ref('')
 const currentPreviewMaterial = ref<RecordMaterial | null>(null)
 const latestRecognition = ref<AiRecognitionData | null>(null)
 
+const queryButtonText = computed(() => (queryMode.value === 'business' ? '查询业务' : '查询考生材料'))
+const emptyDescription = computed(() =>
+  queryMode.value === 'business' ? '请输入业务编号查询待上传材料的业务' : '请选择考籍档案查询该考生的业务材料'
+)
 const businessMaterials = computed(() => {
   const bundle = businessBundle.value
   if (!bundle) return []
@@ -254,6 +338,17 @@ const uploadDisabledReason = computed(() => {
 onMounted(loadMaterialTypes)
 
 /**
+ * @brief 根据当前查询方式加载材料审核数据。
+ */
+function handleSearch() {
+  if (queryMode.value === 'business') {
+    loadBusinessMaterials()
+    return
+  }
+  loadRecordBusinessMaterials()
+}
+
+/**
  * @brief 查询业务申请和材料列表。
  */
 async function loadBusinessMaterials() {
@@ -266,11 +361,78 @@ async function loadBusinessMaterials() {
   try {
     businessBundle.value = await getBusinessMaterials(normalizedBusinessNo)
     businessNo.value = businessBundle.value.applicationNo || normalizedBusinessNo
+    recordBundles.value = []
     latestRecognition.value = null
     ElMessage.success('业务材料已加载')
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * @brief 按考籍档案查询业务材料列表。
+ */
+async function loadRecordBusinessMaterials() {
+  if (!selectedRecordId.value) {
+    ElMessage.warning('请选择考籍档案')
+    return
+  }
+  loading.value = true
+  try {
+    recordBundles.value = await listRecordBusinessMaterials(selectedRecordId.value)
+    businessBundle.value = recordBundles.value[0] ?? null
+    if (businessBundle.value) {
+      businessNo.value = businessBundle.value.applicationNo
+    }
+    latestRecognition.value = null
+    ElMessage.success(`已加载 ${recordBundles.value.length} 条考生相关业务`)
+  } finally {
+    loading.value = false
+  }
+}
+
+/**
+ * @brief 远程搜索考籍档案，供考生材料查询下拉选择。
+ *
+ * @param keyword 考籍号、考生姓名或身份证号关键字。
+ */
+async function searchStudentRecords(keyword: string) {
+  recordLoading.value = true
+  try {
+    const result = await pageStudentRecords({
+      pageNo: 1,
+      pageSize: 20,
+      keyword: keyword || undefined,
+      recordStatus: 'NORMAL',
+      archiveStatus: 'UNARCHIVED'
+    })
+    recordOptions.value = result.records ?? []
+  } finally {
+    recordLoading.value = false
+  }
+}
+
+/**
+ * @brief 首次展开考籍档案下拉框时加载可选档案。
+ *
+ * @param visible 下拉框是否展开。
+ */
+function handleRecordSelectVisible(visible: boolean) {
+  if (visible && recordOptions.value.length === 0) {
+    searchStudentRecords('')
+  }
+}
+
+/**
+ * @brief 切换考籍档案时清空已选业务材料包。
+ *
+ * @param recordId 考籍档案ID。
+ */
+function handleRecordChange(recordId?: number) {
+  selectedRecordId.value = recordId
+  recordBundles.value = []
+  businessBundle.value = null
+  latestRecognition.value = null
 }
 
 /**
@@ -293,7 +455,41 @@ async function loadMaterialTypes() {
  */
 function resetPage() {
   businessNo.value = ''
+  selectedRecordId.value = undefined
+  recordBundles.value = []
   businessBundle.value = null
+  latestRecognition.value = null
+}
+
+/**
+ * @brief 选择考生查询结果中的业务材料包。
+ *
+ * @param bundle 业务申请材料包。
+ */
+function selectBusinessBundle(bundle: BusinessMaterialBundle) {
+  businessBundle.value = bundle
+  businessNo.value = bundle.applicationNo || String(bundle.id)
+  latestRecognition.value = null
+}
+
+function formatRecordOption(record: StudentRecord) {
+  const candidateName = record.candidateName || '未知考生'
+  const idCard = record.idCard ? ` / ${record.idCard}` : ''
+  const majorName = record.majorName ? ` / ${record.majorName}` : ''
+  return `${record.recordNo} / ${candidateName}${idCard}${majorName}`
+}
+
+/**
+ * @brief 刷新当前选中业务材料。
+ */
+async function refreshCurrentMaterials() {
+  if (!businessBundle.value) return
+  const refreshedBundle = await getBusinessMaterials(businessBundle.value.applicationNo || String(businessBundle.value.id))
+  businessBundle.value = refreshedBundle
+  const index = recordBundles.value.findIndex((item) => item.id === refreshedBundle.id)
+  if (index >= 0) {
+    recordBundles.value.splice(index, 1, refreshedBundle)
+  }
 }
 
 /**
@@ -333,6 +529,7 @@ async function handleUploadRequest(options: UploadRequestOptions) {
       selectedMaterialType.value,
       options.file
     )
+    syncSelectedBundleToRecordResults()
     await recognizeUploadedMaterial(options.file)
     options.onSuccess(businessBundle.value as never)
     ElMessage.success('材料上传成功，已同步到业务申请')
@@ -404,6 +601,22 @@ async function downloadMaterial(material: RecordMaterial) {
 }
 
 /**
+ * @brief 审核通过当前业务下的单条材料。
+ *
+ * @param material 待审核通过的材料。
+ */
+async function approveMaterial(material: RecordMaterial) {
+  await ElMessageBox.confirm(`确认将材料“${material.originalFileName}”审核通过吗？`, '审核确认', {
+    type: 'warning',
+    confirmButtonText: '通过',
+    cancelButtonText: '取消'
+  })
+  await approveRecordMaterial(material.id)
+  await refreshCurrentMaterials()
+  ElMessage.success('材料已审核通过')
+}
+
+/**
  * @brief 删除当前业务材料并刷新业务材料包。
  *
  * @param material 待删除材料。
@@ -418,7 +631,19 @@ async function deleteMaterial(material: RecordMaterial) {
   await deleteRecordMaterial(material.id)
   latestRecognition.value = null
   businessBundle.value = await getBusinessMaterials(businessBundle.value.applicationNo || String(businessBundle.value.id))
+  syncSelectedBundleToRecordResults()
   ElMessage.success('材料已删除')
+}
+
+/**
+ * @brief 将当前业务材料包同步回考生查询结果列表。
+ */
+function syncSelectedBundleToRecordResults() {
+  if (!businessBundle.value) return
+  const index = recordBundles.value.findIndex((item) => item.id === businessBundle.value?.id)
+  if (index >= 0) {
+    recordBundles.value.splice(index, 1, businessBundle.value)
+  }
 }
 
 function revokePreviewUrl() {
@@ -534,6 +759,7 @@ function extractSuffix(fileName: string) {
 }
 
 .query-card,
+.result-card,
 .info-card,
 .upload-card,
 .table-card {
@@ -550,8 +776,16 @@ function extractSuffix(fileName: string) {
   width: 280px;
 }
 
+.query-form :deep(.record-select) {
+  width: 320px;
+}
+
 .upload-card {
   margin-top: 16px;
+}
+
+.result-card {
+  margin-top: 0;
 }
 
 .upload-card :deep(.el-select),

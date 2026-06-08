@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -114,6 +115,24 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
     }
 
     /**
+     * @brief 按考籍档案查询业务申请材料包列表。
+     *
+     * @param recordId 考籍档案ID。
+     * @return 考籍档案相关业务申请材料包列表。
+     */
+    @Override
+    public List<BusinessMaterialBundleVO> listRecordBusinessMaterials(Long recordId) {
+        validateRecordExists(recordId);
+        return businessApplicationMapper.selectList(new LambdaQueryWrapper<BusinessApplication>()
+                        .eq(BusinessApplication::getRecordId, recordId)
+                        .orderByDesc(BusinessApplication::getSubmitTime)
+                        .orderByDesc(BusinessApplication::getCreateTime))
+                .stream()
+                .map(this::buildBusinessMaterialBundle)
+                .toList();
+    }
+
+    /**
      * @brief 上传档案材料。
      *
      * @details
@@ -186,6 +205,25 @@ public class RecordMaterialServiceImpl extends ServiceImpl<RecordMaterialMapper,
         RecordMaterialVO uploadedMaterial = uploadMaterial(dto, file);
         appendBusinessMaterialId(application, uploadedMaterial.getId());
         return buildBusinessMaterialBundle(businessApplicationMapper.selectById(application.getId()));
+    }
+
+    /**
+     * @brief 审核通过单条档案材料。
+     *
+     * @param id 材料ID。
+     * @return 审核通过后的材料记录。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RecordMaterialVO approveMaterial(Long id) {
+        RecordMaterial material = getExistingMaterial(id);
+        TokenUserVO user = AuthContextHolder.getUser();
+        material.setAuditStatus("APPROVED");
+        material.setAuditOpinion("材料审核通过");
+        material.setAuditUserId(user == null ? null : user.getId());
+        material.setAuditTime(LocalDateTime.now());
+        updateById(material);
+        return RecordMaterialVO.fromEntity(getById(id));
     }
 
     /**

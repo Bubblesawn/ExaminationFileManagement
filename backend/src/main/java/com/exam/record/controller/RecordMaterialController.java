@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -74,6 +75,17 @@ public class RecordMaterialController {
     }
 
     /**
+     * @brief 按考籍档案查询业务申请材料包列表。
+     *
+     * @param recordId 考籍档案ID。
+     * @return 考籍档案相关业务申请材料包列表。
+     */
+    @GetMapping("/records/{recordId}/businesses")
+    public Result<List<BusinessMaterialBundleVO>> listRecordBusinessMaterials(@PathVariable Long recordId) {
+        return Result.success(recordMaterialService.listRecordBusinessMaterials(recordId));
+    }
+
+    /**
      * @brief 上传档案材料。
      *
      * @param dto 上传业务字段。
@@ -99,6 +111,17 @@ public class RecordMaterialController {
                                                                    @RequestParam String materialType,
                                                                    @RequestPart("file") MultipartFile file) {
         return Result.success(recordMaterialService.uploadBusinessMaterial(businessNo, materialType, file));
+    }
+
+    /**
+     * @brief 审核通过单条档案材料。
+     *
+     * @param id 材料ID。
+     * @return 审核通过后的材料记录。
+     */
+    @PutMapping("/{id}/approve")
+    public Result<RecordMaterialVO> approveMaterial(@PathVariable Long id) {
+        return Result.success(recordMaterialService.approveMaterial(id));
     }
 
     /**

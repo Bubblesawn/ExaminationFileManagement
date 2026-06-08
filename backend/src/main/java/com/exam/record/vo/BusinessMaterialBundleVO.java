@@ -24,6 +24,9 @@ public class BusinessMaterialBundleVO {
     private String applicationStatus;
     private String currentNodeName;
     private String applyUserName;
+    private Long auditUserId;
+    private String auditUserName;
+    private LocalDateTime auditTime;
     private LocalDateTime submitTime;
     private List<Long> materialIds;
     private List<RecordMaterialVO> materials;
@@ -49,6 +52,9 @@ public class BusinessMaterialBundleVO {
         vo.setApplicationStatus(application.getApplicationStatus());
         vo.setCurrentNodeName(application.getCurrentNodeName());
         vo.setApplyUserName(application.getApplyUserName());
+        vo.setAuditUserId(application.getAuditUserId());
+        vo.setAuditUserName(application.getAuditUserName());
+        vo.setAuditTime(application.getAuditTime());
         vo.setSubmitTime(application.getSubmitTime());
         vo.setMaterialIds(materialIds);
         vo.setMaterials(materials);
