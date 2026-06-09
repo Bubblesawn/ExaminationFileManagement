@@ -18,14 +18,20 @@
         <el-col :xs="24" :md="10">
           <div class="summary-block">
             <div class="preview-box">
-              <el-image
-                v-if="previewImageUrl"
-                class="preview-image"
-                :src="previewImageUrl"
-                :preview-src-list="[previewImageUrl]"
-                fit="contain"
-                preview-teleported
-              />
+              <div v-if="previewImageUrl" class="preview-image-stage">
+                <img ref="previewImageRef" :src="previewImageUrl" alt="材料预览" @load="updatePreviewMetrics" />
+                <div v-if="detectionBoxStyles.length" class="detection-overlay" aria-label="目标检测标注">
+                  <div
+                    v-for="box in detectionBoxStyles"
+                    :key="box.key"
+                    class="detection-box"
+                    :style="box.style"
+                    :title="box.title"
+                  >
+                    <span class="detection-label">{{ box.label }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-else class="preview-placeholder">未提供图片地址</div>
             </div>
             <div v-if="isSegmentResult && segmentationImageUrl" class="preview-actions">
@@ -166,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   AiRecognitionData,
   DetectedObject,
@@ -187,6 +193,8 @@ const emit = defineEmits<{
 
 const editableResult = ref<AiRecognitionData>({})
 const manualRemark = ref('')
+const previewImageRef = ref<HTMLImageElement | null>(null)
+const previewMetrics = ref({ displayWidth: 0, displayHeight: 0, naturalWidth: 0, naturalHeight: 0 })
 
 const hasResult = computed(() => Boolean(props.result))
 const resultTitle = computed(() => props.taskName || '请先发起图片识别')
@@ -196,6 +204,34 @@ const segmentRows = computed<MaterialSegment[]>(() => editableResult.value.segme
 const isSegmentResult = computed(() => segmentRows.value.length > 0)
 const segmentationImageUrl = computed(() => buildPreviewImageUrl(editableResult.value.segmentation_image_url))
 const previewImageUrl = computed(() => segmentationImageUrl.value || buildPreviewImageUrl(editableResult.value.file_url))
+const detectionBoxStyles = computed(() => {
+  const { displayWidth, displayHeight, naturalWidth, naturalHeight } = previewMetrics.value
+  if (!displayWidth || !displayHeight || !naturalWidth || !naturalHeight) return []
+
+  return objectRows.value
+    .filter((item) => item.bbox)
+    .map((item, index) => {
+      const color = detectionColor(item.object_code, index)
+      const left = clamp((item.bbox.x / naturalWidth) * displayWidth, 0, displayWidth)
+      const top = clamp((item.bbox.y / naturalHeight) * displayHeight, 0, displayHeight)
+      const width = clamp((item.bbox.width / naturalWidth) * displayWidth, 1, displayWidth - left)
+      const height = clamp((item.bbox.height / naturalHeight) * displayHeight, 1, displayHeight - top)
+
+      return {
+        key: `${item.object_code}-${index}-${item.bbox.x}-${item.bbox.y}`,
+        label: item.object_name,
+        title: `${item.object_name} ${formatPercent(item.confidence)} ${formatBbox(item.bbox)}`,
+        style: {
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`,
+          borderColor: color,
+          '--detect-color': color
+        }
+      }
+    })
+})
 
 const confidencePercent = computed({
   get: () => Number(((editableResult.value.confidence ?? 0) * 100).toFixed(1)),
@@ -223,9 +259,18 @@ watch(
   (value) => {
     editableResult.value = cloneResult(value)
     manualRemark.value = ''
+    nextTick(updatePreviewMetrics)
   },
   { immediate: true, deep: true }
 )
+
+onMounted(() => {
+  window.addEventListener('resize', updatePreviewMetrics)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updatePreviewMetrics)
+})
 
 /**
  * @brief 深拷贝识别结果，隔离父组件原始算法返回值。
@@ -265,6 +310,27 @@ function openPreviewImage() {
 }
 
 /**
+ * @brief 刷新材料预览图的真实尺寸和当前显示尺寸。
+ *
+ * @details
+ * 目标检测坐标来自原图像素空间，预览图会按容器缩放显示；此函数用于建立原图坐标到页面像素坐标的换算关系。
+ */
+function updatePreviewMetrics() {
+  const image = previewImageRef.value
+  if (!image) {
+    previewMetrics.value = { displayWidth: 0, displayHeight: 0, naturalWidth: 0, naturalHeight: 0 }
+    return
+  }
+
+  previewMetrics.value = {
+    displayWidth: image.clientWidth,
+    displayHeight: image.clientHeight,
+    naturalWidth: image.naturalWidth,
+    naturalHeight: image.naturalHeight
+  }
+}
+
+/**
  * @brief 生成可在当前前端页面中加载的材料预览地址。
  *
  * @details
@@ -289,6 +355,23 @@ function formatPercent(value?: number) {
 function formatBbox(bbox?: ObjectBoundingBox) {
   if (!bbox) return '-'
   return `x:${bbox.x} y:${bbox.y} w:${bbox.width} h:${bbox.height}`
+}
+
+/**
+ * @brief 按目标类别生成稳定的检测框颜色。
+ *
+ * @param objectCode 目标区域编码。
+ * @param index 同类或无编码目标的兜底序号。
+ * @return 用于边框和标签的十六进制颜色值。
+ */
+function detectionColor(objectCode: string, index: number) {
+  const palette = ['#dc2626', '#2563eb', '#16a34a', '#ca8a04', '#7c3aed', '#0891b2', '#db2777', '#ea580c']
+  const seed = Array.from(objectCode || `${index}`).reduce((sum, char) => sum + char.charCodeAt(0), index)
+  return palette[seed % palette.length]
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max))
 }
 
 function riskText(level: DetectedObject['risk_level']) {
@@ -362,10 +445,20 @@ function riskTagType(level: DetectedObject['risk_level']) {
   border-radius: 8px;
 }
 
-.preview-image,
-.preview-box :deep(.el-image__inner) {
+.preview-image-stage {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 260px;
+}
+
+.preview-box img {
   display: block;
-  width: 100%;
+  width: auto;
+  height: auto;
+  max-width: 100%;
   max-height: 260px;
   object-fit: contain;
 }
@@ -375,6 +468,35 @@ function riskTagType(level: DetectedObject['risk_level']) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.detection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.detection-box {
+  position: absolute;
+  border: 2px solid var(--detect-color);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 82%), 0 6px 14px rgb(15 23 42 / 16%);
+}
+
+.detection-label {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  max-width: 180px;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--detect-color);
+  border-radius: 4px 4px 4px 0;
 }
 
 .preview-placeholder {

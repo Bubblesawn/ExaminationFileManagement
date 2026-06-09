@@ -1,0 +1,13 @@
+path: E:/shixun/ExaminationFileManagement/algorithm-service/dataset/detection_material_dataset
+train: images/train
+val: images/val
+test: images/val
+nc: 6
+names:
+  0: ADMISSION_TICKET
+  1: DIPLOMA
+  2: EXEMPTION_CERTIFICATE
+  3: PHOTO
+  4: TRANSCRIPT
+  5: ID_CARD
+source_dataset: D:/qqfile/segmentation_material_dataset/segmentation_material_dataset
