@@ -20,7 +20,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEGMENT_MODEL_PATH = SERVICE_ROOT / "app" / "models" / "weights" / "material-seg.pt"
 MASK_OUTPUT_DIR = SERVICE_ROOT / "uploads" / "masks"
 SEGMENT_OUTPUT_DIR = SERVICE_ROOT / "uploads" / "segments"
-DEFAULT_CONFIDENCE_THRESHOLD = 0.25
+DEFAULT_CONFIDENCE_THRESHOLD = 0.4
 DEFAULT_IMAGE_SIZE = 640
 
 SEGMENT_CLASS_TYPE_MAPPING = {
