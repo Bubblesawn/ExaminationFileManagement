@@ -42,6 +42,7 @@ from app.services.image_analysis_service import (
     scale_template_bbox,
 )
 from app.services.yolo_classify_service import build_yolo_material_candidates
+from app.services.yolo_detect_service import build_yolo_detected_objects
 from app.services.yolo_segment_service import (
     build_yolo_material_segments,
     write_polygon_mask_image,
@@ -1120,7 +1121,7 @@ def detect_objects(request: ImageTaskRequest) -> dict:
     analysis = analyze_image(request.file_url)
     quality = _check_image_quality(request.file_url, analysis)
     category_code = _match_material_category(request, analysis)
-    objects = _build_detected_objects(category_code, request.file_url, analysis)
+    objects = build_yolo_detected_objects(request) or _build_detected_objects(category_code, request.file_url, analysis)
     has_high_risk = any(item.risk_level == "HIGH" for item in objects)
     suggested_action = "REJECT" if not quality.readable or not objects else "REVIEW" if has_high_risk else "ACCEPT"
     result = ObjectDetectResult(
